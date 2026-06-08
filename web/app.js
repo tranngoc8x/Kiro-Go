@@ -1421,7 +1421,7 @@
     const d = await res.json();
     $('requireApiKey').checked = d.requireApiKey;
     $('allowOverUsage').checked = d.allowOverUsage || false;
-    await Promise.all([loadThinkingConfig(), loadEndpointConfig(), loadProxyConfig(), loadPromptFilter(), loadApiKeys()]);
+    await Promise.all([loadThinkingConfig(), loadEndpointConfig(), loadProxyConfig(), loadPromptFilter(), loadCavemanConfig(), loadApiKeys()]);
     refreshCustomSelects();
   }
   async function loadThinkingConfig() {
@@ -1528,6 +1528,42 @@
     const allowOverUsage = $('allowOverUsage').checked;
     await api('/settings', { method: 'POST', body: JSON.stringify({ allowOverUsage }) });
     toast(t('settings.overUsageSaved'), 'success');
+  }
+  async function loadCavemanConfig() {
+    try {
+      const res = await api('/caveman');
+      const d = await res.json();
+      const sel = $('cavemanMode');
+      if (sel) sel.value = d.mode || 'off';
+      updateCavemanBadge(d.mode || 'off');
+    } catch (e) { /* non-fatal */ }
+  }
+  function updateCavemanBadge(mode) {
+    const badge = $('cavemanStatusBadge');
+    if (!badge) return;
+    if (!mode || mode === 'off') {
+      badge.style.display = 'none';
+      return;
+    }
+    badge.style.display = '';
+    badge.className = 'badge badge-info';
+    badge.textContent = '🪨 ' + mode.toUpperCase();
+  }
+  async function saveCavemanConfig() {
+    const sel = $('cavemanMode');
+    const mode = sel ? sel.value : 'off';
+    try {
+      const res = await api('/caveman', { method: 'POST', body: JSON.stringify({ mode }) });
+      const d = await res.json();
+      if (d.success) {
+        updateCavemanBadge(mode);
+        toast('🪨 ' + t('settings.cavemanSaved'), 'success');
+      } else {
+        toast(t('common.saveFailed') + ': ' + (d.error || ''), 'error');
+      }
+    } catch (e) {
+      toast(t('common.saveFailed'), 'error');
+    }
   }
   async function changePassword() {
     const np = $('newPassword').value;
@@ -1885,7 +1921,7 @@
         '<input class="rule-name-input" value="' + escapeAttr(r.name || '') + '" data-rule-idx="' + i + '" data-rule-field="name" placeholder="' + escapeAttr(t('promptFilter.unnamed')) + '" />' +
         '<span class="rule-type">' + escapeHtml(typeLabel) + '</span>' +
         '</div>' +
-        '<button class="rule-remove" data-rule-remove="' + i + '" type="button" aria-label="' + escapeAttr(t('common.remove')) + '">&times;</button>' +
+        '<button class="rule-remove" data-rule-remove="' + (i+1) + '" type="button" aria-label="' + escapeAttr(t('common.remove')) + '">&times;</button>' +
         '</div>' +
         '<div class="rule-body">' +
         '<div class="rule-field"><label>' + escapeHtml(t('promptFilter.match')) + '</label>' +
@@ -2680,6 +2716,7 @@
     $('changePasswordBtn').addEventListener('click', changePassword);
     $('proxyType').addEventListener('change', onProxyTypeChange);
     $('saveProxyBtn').addEventListener('click', saveProxyConfig);
+    $('saveCavemanBtn').addEventListener('click', saveCavemanConfig);
     $('resetStatsBtn').addEventListener('click', resetStats);
     bindApiKeyEvents();
   }

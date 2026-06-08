@@ -198,6 +198,11 @@ type Config struct {
 	// PromptFilterRules is a list of user-defined prompt sanitization rules (regex or line-filter).
 	PromptFilterRules []PromptFilterRule `json:"promptFilterRules,omitempty"`
 
+	// CavemanMode injects caveman-style compact response instructions into every request's
+	// system prompt, reducing output tokens by ~75% while preserving technical accuracy.
+	// Values: "" or "off" (disabled), "lite", "full" (default when enabled), "ultra", "wenyan".
+	CavemanMode string `json:"cavemanMode,omitempty"`
+
 	// LogLevel controls verbosity of application logs.
 	// Accepted values: "debug", "info", "warn", "error". Defaults to "info".
 	// Can be overridden by the LOG_LEVEL environment variable.
@@ -888,6 +893,26 @@ func GetKiroClientConfig() KiroClientConfig {
 		SystemVersion: systemVersion,
 		NodeVersion:   nodeVersion,
 	}
+}
+
+// GetCavemanMode returns the current caveman mode setting.
+// Returns "" or "off" when disabled, or "lite"/"full"/"ultra"/"wenyan" when active.
+func GetCavemanMode() string {
+	cfgLock.RLock()
+	defer cfgLock.RUnlock()
+	if cfg == nil {
+		return ""
+	}
+	return cfg.CavemanMode
+}
+
+// UpdateCavemanMode sets the caveman mode and persists the change.
+// Accepted values: "" or "off" (disabled), "lite", "full", "ultra", "wenyan".
+func UpdateCavemanMode(mode string) error {
+	cfgLock.Lock()
+	defer cfgLock.Unlock()
+	cfg.CavemanMode = mode
+	return Save()
 }
 
 func defaultSystemVersion() string {

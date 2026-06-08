@@ -407,11 +407,33 @@
           </div>
         </div>
 
+        <!-- Caveman Mode -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">🪨 Caveman Mode</span>
+            <span id="cavemanStatusBadge" class="badge" style="display:none"></span>
+          </div>
+          <div class="form-group">
+            <label data-i18n="settings.cavemanMode"></label>
+            <select id="cavemanMode">
+              <option value="off" data-i18n="settings.cavemanOff"></option>
+              <option value="lite" data-i18n="settings.cavemanLite"></option>
+              <option value="full" data-i18n="settings.cavemanFull"></option>
+              <option value="ultra" data-i18n="settings.cavemanUltra"></option>
+              <option value="wenyan" data-i18n="settings.cavemanWenyan"></option>
+            </select>
+            <small data-i18n="settings.cavemanHint"></small>
+          </div>
+          <button class="btn btn-primary" id="saveCavemanBtn" data-i18n="settings.saveCaveman"></button>
+        </div>
+
         <!-- Statistics reset -->
+
         <div class="card">
           <div class="card-header"><span class="card-title" data-i18n="settings.statistics"></span></div>
           <button class="btn btn-danger" id="resetStatsBtn" data-i18n="settings.resetStats"></button>
         </div>
+
       </div>
 
       <!-- API tab -->

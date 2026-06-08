@@ -435,5 +435,14 @@
   "apiKeys.closeBtn": "Close",
   "apiKeys.saveBtn": "Save",
   "apiKeys.cancelBtn": "Cancel",
-  "apiKeys.loadFailed": "Failed to load API keys"
+  "apiKeys.loadFailed": "Failed to load API keys",
+  "settings.cavemanMode": "Caveman Mode Level",
+  "settings.cavemanOff": "Off (disabled)",
+  "settings.cavemanLite": "Lite — drop filler phrases only",
+  "settings.cavemanFull": "Full — caveman speech (~75% token savings)",
+  "settings.cavemanUltra": "Ultra — maximum telegraphic compression",
+  "settings.cavemanWenyan": "Wenyan (文言) — classical Chinese style",
+  "settings.cavemanHint": "Injects compact-response instructions into every system prompt. Reduces AI output tokens by up to 75% while preserving technical accuracy.",
+  "settings.saveCaveman": "Save Caveman Settings",
+  "settings.cavemanSaved": "Caveman mode saved"
 }

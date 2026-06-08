@@ -2136,6 +2136,10 @@ func (h *Handler) handleAdminAPI(w http.ResponseWriter, r *http.Request) {
 		h.apiGetPromptFilter(w, r)
 	case path == "/prompt-filter" && r.Method == "POST":
 		h.apiUpdatePromptFilter(w, r)
+	case path == "/caveman" && r.Method == "GET":
+		h.apiGetCavemanConfig(w, r)
+	case path == "/caveman" && r.Method == "POST":
+		h.apiUpdateCavemanConfig(w, r)
 	case path == "/version" && r.Method == "GET":
 		h.apiGetVersion(w, r)
 	case path == "/export" && r.Method == "POST":
@@ -2937,6 +2941,49 @@ func (h *Handler) apiUpdatePromptFilter(w http.ResponseWriter, r *http.Request) 
 		rules = *req.Rules
 	}
 	if err := config.UpdatePromptFilterConfig(fcc, fen, fsb, rules); err != nil {
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// apiGetCavemanConfig returns the current caveman mode setting.
+func (h *Handler) apiGetCavemanConfig(w http.ResponseWriter, r *http.Request) {
+	mode := config.GetCavemanMode()
+	if mode == "" {
+		mode = "off"
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"mode":    mode,
+		"enabled": mode != "off",
+		"levels":  []string{"off", "lite", "full", "ultra", "wenyan"},
+	})
+}
+
+// apiUpdateCavemanConfig updates the caveman mode setting.
+func (h *Handler) apiUpdateCavemanConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
+		return
+	}
+
+	mode := strings.ToLower(strings.TrimSpace(req.Mode))
+	validModes := map[string]bool{"off": true, "": true, "lite": true, "full": true, "ultra": true, "wenyan": true}
+	if !validModes[mode] {
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid mode, must be: off, lite, full, ultra, wenyan"})
+		return
+	}
+	// Normalize "off" to empty string for storage.
+	if mode == "off" {
+		mode = ""
+	}
+	if err := config.UpdateCavemanMode(mode); err != nil {
 		w.WriteHeader(500)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return

@@ -435,5 +435,14 @@
   "apiKeys.closeBtn": "关闭",
   "apiKeys.saveBtn": "保存",
   "apiKeys.cancelBtn": "取消",
-  "apiKeys.loadFailed": "加载 API Key 列表失败"
+  "apiKeys.loadFailed": "加载 API Key 列表失败",
+  "settings.cavemanMode": "Caveman 模式级别",
+  "settings.cavemanOff": "关闭（禁用）",
+  "settings.cavemanLite": "Lite — 仅去除废话套话",
+  "settings.cavemanFull": "Full — 穴居人说话（节省约 75% 输出 Token）",
+  "settings.cavemanUltra": "Ultra — 极限压缩电报体",
+  "settings.cavemanWenyan": "文言 — 古汉语精简风格",
+  "settings.cavemanHint": "在每个请求的系统提示词中注入精简指令，可将 AI 输出 Token 减少约 75%，同时保持技术准确性。",
+  "settings.saveCaveman": "保存 Caveman 设置",
+  "settings.cavemanSaved": "Caveman 模式已保存"
 }

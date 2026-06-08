@@ -358,40 +358,65 @@ func buildClaudeSystemPrompt(system interface{}, thinking bool) string {
 
 // applyPromptFilters applies all enabled prompt filter rules to the system prompt.
 // Order: (1) Claude Code detection → full replacement, (2) strip boundary markers,
-// (3) strip env noise, (4) user-defined regex/line-filter rules.
+// (3) strip env noise, (4) user-defined regex/line-filter rules, (5) caveman injection.
 func applyPromptFilters(prompt string) string {
+	return applyPromptFiltersWithCaveman(prompt, "")
+}
+
+// applyPromptFiltersWithCaveman is the full implementation; cavemanOverride overrides
+// the global config value (used for per-request X-Caveman-Mode header support).
+func applyPromptFiltersWithCaveman(prompt, cavemanOverride string) string {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
+		// Still inject caveman even for empty system prompt so caveman mode
+		// is always active regardless of whether the client sent a system prompt.
+		mode := cavemanOverride
+		if mode == "" {
+			mode = config.GetCavemanMode()
+		}
+		if mode != "" && mode != "off" {
+			return buildCavemanPrompt(mode)
+		}
 		return ""
 	}
 
 	// 1. Detect Claude Code CLI system prompt → replace with minimal backend prompt.
 	//    Run before other filters so we don't waste time stripping a prompt we'll replace anyway.
 	if config.GetFilterClaudeCode() && isClaudeCodeSystemPrompt(prompt) {
-		return claudeCodeBackendPrompt
-	}
-
-	// 2. Strip --- SYSTEM PROMPT --- / --- END SYSTEM PROMPT --- boundary markers.
-	if config.GetFilterStripBoundaries() {
-		prompt = stripBoundaryMarkers(prompt)
-	}
-
-	// 3. Strip environment metadata lines (git status, env sections, etc.).
-	if config.GetFilterEnvNoise() {
-		prompt = stripEnvNoiseLines(prompt)
-	}
-
-	// 4. User-defined rules (regex find/replace or line-level substring filter).
-	rules := config.GetPromptFilterRules()
-	for _, rule := range rules {
-		if !rule.Enabled || prompt == "" {
-			continue
+		prompt = claudeCodeBackendPrompt
+	} else {
+		// 2. Strip --- SYSTEM PROMPT --- / --- END SYSTEM PROMPT --- boundary markers.
+		if config.GetFilterStripBoundaries() {
+			prompt = stripBoundaryMarkers(prompt)
 		}
-		prompt = applyFilterRule(prompt, rule)
+
+		// 3. Strip environment metadata lines (git status, env sections, etc.).
+		if config.GetFilterEnvNoise() {
+			prompt = stripEnvNoiseLines(prompt)
+		}
+
+		// 4. User-defined rules (regex find/replace or line-level substring filter).
+		rules := config.GetPromptFilterRules()
+		for _, rule := range rules {
+			if !rule.Enabled || prompt == "" {
+				continue
+			}
+			prompt = applyFilterRule(prompt, rule)
+		}
+	}
+
+	// 5. Caveman mode injection — prepend compact response instructions.
+	mode := cavemanOverride
+	if mode == "" {
+		mode = config.GetCavemanMode()
+	}
+	if mode != "" && mode != "off" {
+		prompt = injectCavemanInstructions(strings.TrimSpace(prompt), mode)
 	}
 
 	return strings.TrimSpace(prompt)
 }
+
 
 // applyFilterRule applies a single user-defined filter rule.
 func applyFilterRule(prompt string, rule config.PromptFilterRule) string {
