@@ -843,7 +843,7 @@
         '<div class="account-info">' +
         '<input type="checkbox" class="account-checkbox" ' + (isSelected ? 'checked' : '') + ' data-id="' + idAttr + '" aria-label="' + escapeAttr(selectLabel) + '" />' +
         '<div class="account-info-text">' +
-        '<div class="account-email">' + i + " - "+ escapeHtml(displayEmail) + '</div>' +
+        '<div class="account-email">' + (i + 1) + " - "+ escapeHtml(displayEmail) + '</div>' +
         '<div class="account-meta">' +
         getSubBadge(a.subscriptionType) +
         getTrialBadge(a) +
