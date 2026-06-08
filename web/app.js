@@ -434,7 +434,7 @@
   }
   function getDisplayEmail(email, id) {
     const raw = email || (id ? id.substring(0, 12) + '...' : '-');
-    return maskEmail(raw);
+    return raw;
   }
 
   // Toast bridge
@@ -819,7 +819,7 @@
       container.innerHTML = '<div class="empty-state">' + escapeHtml(t('accounts.empty')) + '</div>';
       return;
     }
-    container.innerHTML = filtered.map(a => {
+    container.innerHTML = filtered.map((a,i) => {
       const usagePct = (a.usagePercent || 0) * 100;
       const usageClass = usagePct > 90 ? 'critical' : usagePct > 70 ? 'high' : '';
       const trialPct = (a.trialUsagePercent || 0) * 100;
@@ -843,7 +843,7 @@
         '<div class="account-info">' +
         '<input type="checkbox" class="account-checkbox" ' + (isSelected ? 'checked' : '') + ' data-id="' + idAttr + '" aria-label="' + escapeAttr(selectLabel) + '" />' +
         '<div class="account-info-text">' +
-        '<div class="account-email">' + escapeHtml(displayEmail) + '</div>' +
+        '<div class="account-email">' + i + " - "+ escapeHtml(displayEmail) + '</div>' +
         '<div class="account-meta">' +
         getSubBadge(a.subscriptionType) +
         getTrialBadge(a) +
@@ -851,6 +851,7 @@
         overageBadge +
         '<span class="badge badge-info">' + escapeHtml(formatAuthMethod(a.provider || a.authMethod)) + '</span>' +
         getStatusBadge(a) +
+        (a.proxyURL ? '<span class="badge badge-info">Proxy</span>' : '') +
         '</div>' +
         '</div>' +
         '</div>' +
