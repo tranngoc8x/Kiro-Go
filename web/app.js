@@ -11,8 +11,8 @@
     localStorage.removeItem('admin_login_time');
   }
   let password = sessionStorage.getItem('admin_password') || localStorage.getItem('admin_password') || '';
-  let currentLang = localStorage.getItem('kiro_lang') || 'zh';
-  const dict = { en: null, zh: null };
+  let currentLang = localStorage.getItem('kiro_lang') || 'en';
+  const dict = { en: null };
   let accountsData = [];
   const selectedAccounts = new Set();
   let filterKeyword = '';
@@ -105,7 +105,7 @@
   }
   function t(key, ...args) {
     const active = dict[currentLang] || {};
-    const fallback = dict.zh || {};
+    const fallback = dict.en || {};
     let text = active[key] || fallback[key] || key;
     args.forEach((arg, idx) => { text = text.replace('{' + idx + '}', arg); });
     return text;
@@ -134,11 +134,11 @@
     qsa('.lang-btn').forEach(btn => btn.classList.toggle('active', btn.dataset.lang === currentLang));
     qsa('.lang-toggle').forEach(btn => {
       const label = btn.querySelector('.lang-toggle-label');
-      if (label) label.textContent = currentLang === 'zh' ? t('lang.zh') : t('lang.en');
+      if (label) label.textContent = t('lang.en');
     });
   }
   function toggleLang() {
-    setLang(currentLang === 'zh' ? 'en' : 'zh');
+    setLang('en');
   }
 
   // Custom select
@@ -2816,7 +2816,7 @@
   async function init() {
     initTheme();
     await loadLocale(currentLang);
-    if (currentLang !== 'zh') await loadLocale('zh');
+    if (currentLang !== 'en') await loadLocale('en');
     applyTranslations();
     initCustomSelectObserver();
     initPrivacyMode();
