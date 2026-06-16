@@ -109,21 +109,17 @@ func TestAccountAllowOverageMigration(t *testing.T) {
 		t.Fatalf("expected legacy field to still be cleared on acc-already-set")
 	}
 
-	// Re-read the file and confirm legacy field is gone (so it doesn't drift
-	// back in on later saves).
-	on_disk, err := os.ReadFile(cfgFile)
+	// Verify that the data is persisted in the SQLite database and the legacy json file is renamed/deleted.
+	if _, err := os.Stat(cfgFile); err == nil {
+		t.Fatalf("expected legacy JSON config to be renamed/deleted, but it still exists")
+	}
+
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM accounts").Scan(&count)
 	if err != nil {
-		t.Fatalf("read back: %v", err)
+		t.Fatalf("failed to query accounts from DB: %v", err)
 	}
-	var reloaded struct {
-		Accounts []map[string]interface{} `json:"accounts"`
-	}
-	if err := json.Unmarshal(on_disk, &reloaded); err != nil {
-		t.Fatalf("decode reload: %v", err)
-	}
-	for _, a := range reloaded.Accounts {
-		if _, ok := a["allowOverage"]; ok {
-			t.Fatalf("expected allowOverage to be omitted from persisted file, got %+v", a)
-		}
+	if count != 3 {
+		t.Fatalf("expected 3 migrated accounts in DB, got %d", count)
 	}
 }

@@ -12,12 +12,17 @@ package config
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 // GenerateMachineId generates a UUID v4 format machine identifier.
@@ -243,24 +248,234 @@ var (
 	cfg     *Config
 	cfgLock sync.RWMutex
 	cfgPath string
+	db      *sql.DB
 )
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+func intToBool(i int) bool {
+	return i != 0
+}
+
+func boolPtrToInt(b *bool) int {
+	if b == nil || *b {
+		return 1
+	}
+	return 0
+}
+
+// initDB initializes/migrates the SQLite database tables.
+func initDB(dbPath string) (*sql.DB, error) {
+	dbConn, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, err
+	}
+
+	queries := []string{
+		`CREATE TABLE IF NOT EXISTS settings (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			password TEXT NOT NULL DEFAULT 'changeme',
+			port INTEGER NOT NULL DEFAULT 8080,
+			host TEXT NOT NULL DEFAULT '0.0.0.0',
+			api_key TEXT NOT NULL DEFAULT '',
+			require_api_key INTEGER NOT NULL DEFAULT 0,
+			kiro_version TEXT NOT NULL DEFAULT '',
+			system_version TEXT NOT NULL DEFAULT '',
+			node_version TEXT NOT NULL DEFAULT '',
+			thinking_suffix TEXT NOT NULL DEFAULT '',
+			openai_thinking_format TEXT NOT NULL DEFAULT '',
+			claude_thinking_format TEXT NOT NULL DEFAULT '',
+			preferred_endpoint TEXT NOT NULL DEFAULT '',
+			endpoint_fallback INTEGER NOT NULL DEFAULT 1,
+			allow_over_usage INTEGER NOT NULL DEFAULT 0,
+			proxy_url TEXT NOT NULL DEFAULT '',
+			filter_claude_code INTEGER NOT NULL DEFAULT 0,
+			filter_env_noise INTEGER NOT NULL DEFAULT 0,
+			filter_strip_boundaries INTEGER NOT NULL DEFAULT 0,
+			caveman_mode TEXT NOT NULL DEFAULT '',
+			log_level TEXT NOT NULL DEFAULT '',
+			total_requests INTEGER NOT NULL DEFAULT 0,
+			success_requests INTEGER NOT NULL DEFAULT 0,
+			failed_requests INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			total_credits REAL NOT NULL DEFAULT 0.0
+		);`,
+		`CREATE TABLE IF NOT EXISTS accounts (
+			id TEXT PRIMARY KEY,
+			email TEXT NOT NULL DEFAULT '',
+			user_id TEXT NOT NULL DEFAULT '',
+			nickname TEXT NOT NULL DEFAULT '',
+			access_token TEXT NOT NULL DEFAULT '',
+			refresh_token TEXT NOT NULL DEFAULT '',
+			client_id TEXT NOT NULL DEFAULT '',
+			client_secret TEXT NOT NULL DEFAULT '',
+			auth_method TEXT NOT NULL DEFAULT '',
+			provider TEXT NOT NULL DEFAULT '',
+			region TEXT NOT NULL DEFAULT '',
+			start_url TEXT NOT NULL DEFAULT '',
+			expires_at INTEGER NOT NULL DEFAULT 0,
+			machine_id TEXT NOT NULL DEFAULT '',
+			profile_arn TEXT NOT NULL DEFAULT '',
+			proxy_url TEXT NOT NULL DEFAULT '',
+			weight INTEGER NOT NULL DEFAULT 0,
+			overage_status TEXT NOT NULL DEFAULT '',
+			overage_capability TEXT NOT NULL DEFAULT '',
+			overage_cap REAL NOT NULL DEFAULT 0.0,
+			overage_rate REAL NOT NULL DEFAULT 0.0,
+			current_overages REAL NOT NULL DEFAULT 0.0,
+			overage_checked_at INTEGER NOT NULL DEFAULT 0,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			ban_status TEXT NOT NULL DEFAULT '',
+			ban_reason TEXT NOT NULL DEFAULT '',
+			ban_time INTEGER NOT NULL DEFAULT 0,
+			subscription_type TEXT NOT NULL DEFAULT '',
+			subscription_title TEXT NOT NULL DEFAULT '',
+			days_remaining INTEGER NOT NULL DEFAULT 0,
+			usage_current REAL NOT NULL DEFAULT 0.0,
+			usage_limit REAL NOT NULL DEFAULT 0.0,
+			usage_percent REAL NOT NULL DEFAULT 0.0,
+			next_reset_date TEXT NOT NULL DEFAULT '',
+			last_refresh INTEGER NOT NULL DEFAULT 0,
+			trial_usage_current REAL NOT NULL DEFAULT 0.0,
+			trial_usage_limit REAL NOT NULL DEFAULT 0.0,
+			trial_usage_percent REAL NOT NULL DEFAULT 0.0,
+			trial_status TEXT NOT NULL DEFAULT '',
+			trial_expires_at INTEGER NOT NULL DEFAULT 0,
+			request_count INTEGER NOT NULL DEFAULT 0,
+			error_count INTEGER NOT NULL DEFAULT 0,
+			last_used INTEGER NOT NULL DEFAULT 0,
+			total_tokens INTEGER NOT NULL DEFAULT 0,
+			total_credits REAL NOT NULL DEFAULT 0.0
+		);`,
+		`CREATE TABLE IF NOT EXISTS api_keys (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			key TEXT NOT NULL UNIQUE,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			migrated INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL DEFAULT 0,
+			last_used_at INTEGER NOT NULL DEFAULT 0,
+			token_limit INTEGER NOT NULL DEFAULT 0,
+			credit_limit REAL NOT NULL DEFAULT 0.0,
+			tokens_used INTEGER NOT NULL DEFAULT 0,
+			credits_used REAL NOT NULL DEFAULT 0.0,
+			requests_count INTEGER NOT NULL DEFAULT 0
+		);`,
+		`CREATE TABLE IF NOT EXISTS prompt_filter_rules (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL DEFAULT '',
+			type TEXT NOT NULL DEFAULT '',
+			match TEXT NOT NULL DEFAULT '',
+			replace TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1
+		);`,
+	}
+
+	for _, q := range queries {
+		if _, err := dbConn.Exec(q); err != nil {
+			dbConn.Close()
+			return nil, err
+		}
+	}
+
+	// Insert default settings row if settings table is empty
+	var count int
+	err = dbConn.QueryRow("SELECT COUNT(*) FROM settings WHERE id = 1").Scan(&count)
+	if err != nil {
+		dbConn.Close()
+		return nil, err
+	}
+	if count == 0 {
+		_, err = dbConn.Exec(`INSERT INTO settings (id, password, port, host, require_api_key) VALUES (1, 'changeme', 8080, '0.0.0.0', 0)`)
+		if err != nil {
+			dbConn.Close()
+			return nil, err
+		}
+	}
+
+	return dbConn, nil
+}
 
 // Init initializes the configuration system with the specified file path.
 // If the file doesn't exist, a default configuration is created.
 func Init(path string) error {
-	cfgPath = path
-	return Load()
-}
+	dbPath := path
+	if strings.HasSuffix(path, ".json") {
+		dbPath = strings.TrimSuffix(path, ".json") + ".db"
+	}
+	cfgPath = dbPath
 
-func Load() error {
-	cfgLock.Lock()
-	defer cfgLock.Unlock()
+	// Ensure parent directory exists
+	dir := filepath.Dir(dbPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
 
-	data, err := os.ReadFile(cfgPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			// Create default configuration.
-			// Binds to 0.0.0.0 by default for Docker/container compatibility.
+	dbExists := false
+	if _, err := os.Stat(dbPath); err == nil {
+		dbExists = true
+	}
+
+	if !dbExists {
+		// SQLite database does not exist. Check if we need to migrate from JSON.
+		jsonExists := false
+		jsonPath := path
+		if strings.HasSuffix(dbPath, ".db") {
+			jsonPath = strings.TrimSuffix(dbPath, ".db") + ".json"
+		} else if !strings.HasSuffix(path, ".json") {
+			jsonPath = path + ".json"
+		}
+		if _, err := os.Stat(jsonPath); err == nil {
+			jsonExists = true
+		}
+
+		if jsonExists {
+			// Migrate from JSON to SQLite
+			data, err := os.ReadFile(jsonPath)
+			if err != nil {
+				return fmt.Errorf("failed to read legacy JSON config: %w", err)
+			}
+
+			var c Config
+			if err := json.Unmarshal(data, &c); err != nil {
+				return fmt.Errorf("failed to parse legacy JSON config: %w", err)
+			}
+
+			// Initialize SQLite database
+			dbConn, err := initDB(dbPath)
+			if err != nil {
+				return fmt.Errorf("failed to initialize SQLite DB during migration: %w", err)
+			}
+			db = dbConn
+			cfg = &c
+
+			// Run migration checks
+			migrateLegacyFields()
+
+			// Save to SQLite database
+			if err := Save(); err != nil {
+				db.Close()
+				return fmt.Errorf("failed to save config to SQLite during migration: %w", err)
+			}
+
+			// Rename JSON to .json.bak
+			if err := os.Rename(jsonPath, jsonPath+".bak"); err != nil {
+				fmt.Printf("Warning: failed to rename legacy JSON config to .bak: %v\n", err)
+			}
+			return nil
+		} else {
+			// Brand new install
+			dbConn, err := initDB(dbPath)
+			if err != nil {
+				return fmt.Errorf("failed to initialize SQLite DB: %w", err)
+			}
+			db = dbConn
+
 			cfg = &Config{
 				Password:      "changeme",
 				Port:          8080,
@@ -268,23 +483,27 @@ func Load() error {
 				RequireApiKey: false,
 				Accounts:      []Account{},
 			}
-			return saveLocked()
+			if err := Save(); err != nil {
+				db.Close()
+				return fmt.Errorf("failed to save default config: %w", err)
+			}
+			return nil
 		}
-		return err
 	}
 
-	var c Config
-	if err := json.Unmarshal(data, &c); err != nil {
-		return err
+	// Database already exists, open it and load
+	dbConn, err := initDB(dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open SQLite DB: %w", err)
 	}
-	cfg = &c
+	db = dbConn
 
+	return Load()
+}
+
+func migrateLegacyFields() {
 	// Migration: if a legacy single ApiKey is present and the new ApiKeys list is empty,
-	// promote it into the new structure. The migrated entry inherits the legacy
-	// RequireApiKey state — if the legacy deployment was public (RequireApiKey=false),
-	// we mark the entry disabled so it doesn't accidentally start enforcing auth.
-	// Operators can flip it on later from the admin UI. The legacy field is kept
-	// for backward compatibility when reading older config files.
+	// promote it into the new structure.
 	if cfg.ApiKey != "" && len(cfg.ApiKeys) == 0 {
 		cfg.ApiKeys = append(cfg.ApiKeys, ApiKeyEntry{
 			ID:        newUUID(),
@@ -294,56 +513,274 @@ func Load() error {
 			Migrated:  true,
 			CreatedAt: time.Now().Unix(),
 		})
-		if err := saveLocked(); err != nil {
-			return err
-		}
 	}
 
 	// Migration: per-account AllowOverage → OverageStatus.
-	// Pre-Overages-switch deployments stored `allowOverage: true` to mean "keep
-	// dispatching when quota is exhausted". The new model reads OverageStatus
-	// from the upstream AWS Q switch instead. To avoid silently disabling
-	// previously-allowed accounts on first launch, treat allowOverage=true as
-	// OverageStatus="ENABLED" (operators can refresh from AWS later). The
-	// legacy field is then cleared so future saves don't re-emit it.
-	overageMigrated := false
 	for i := range cfg.Accounts {
 		if cfg.Accounts[i].LegacyAllowOverage {
 			if cfg.Accounts[i].OverageStatus == "" {
 				cfg.Accounts[i].OverageStatus = "ENABLED"
 			}
 			cfg.Accounts[i].LegacyAllowOverage = false
-			overageMigrated = true
 		}
 	}
-	if overageMigrated {
-		if err := saveLocked(); err != nil {
+}
+
+func Load() error {
+	cfgLock.Lock()
+	defer cfgLock.Unlock()
+
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	// 1. Load settings row
+	var c Config
+	var requireApiKeyInt, allowOverUsageInt, filterClaudeCodeInt, filterEnvNoiseInt, filterStripBoundariesInt int
+	var endpointFallbackInt int
+	err := db.QueryRow(`
+		SELECT password, port, host, api_key, require_api_key,
+			kiro_version, system_version, node_version,
+			thinking_suffix, openai_thinking_format, claude_thinking_format,
+			preferred_endpoint, endpoint_fallback, allow_over_usage, proxy_url,
+			filter_claude_code, filter_env_noise, filter_strip_boundaries,
+			caveman_mode, log_level, total_requests, success_requests,
+			failed_requests, total_tokens, total_credits
+		FROM settings WHERE id = 1`).Scan(
+		&c.Password, &c.Port, &c.Host, &c.ApiKey, &requireApiKeyInt,
+		&c.KiroVersion, &c.SystemVersion, &c.NodeVersion,
+		&c.ThinkingSuffix, &c.OpenAIThinkingFormat, &c.ClaudeThinkingFormat,
+		&c.PreferredEndpoint, &endpointFallbackInt, &allowOverUsageInt, &c.ProxyURL,
+		&filterClaudeCodeInt, &filterEnvNoiseInt, &filterStripBoundariesInt,
+		&c.CavemanMode, &c.LogLevel, &c.TotalRequests, &c.SuccessRequests,
+		&c.FailedRequests, &c.TotalTokens, &c.TotalCredits,
+	)
+	if err != nil {
+		return err
+	}
+	c.RequireApiKey = intToBool(requireApiKeyInt)
+	c.AllowOverUsage = intToBool(allowOverUsageInt)
+	c.FilterClaudeCode = intToBool(filterClaudeCodeInt)
+	c.FilterEnvNoise = intToBool(filterEnvNoiseInt)
+	c.FilterStripBoundaries = intToBool(filterStripBoundariesInt)
+	fallbackVal := intToBool(endpointFallbackInt)
+	c.EndpointFallback = &fallbackVal
+
+	// 2. Load accounts
+	rows, err := db.Query(`
+		SELECT id, email, user_id, nickname, access_token, refresh_token,
+			client_id, client_secret, auth_method, provider, region,
+			start_url, expires_at, machine_id, profile_arn, proxy_url,
+			weight, overage_status, overage_capability, overage_cap,
+			overage_rate, current_overages, overage_checked_at, enabled,
+			ban_status, ban_reason, ban_time, subscription_type,
+			subscription_title, days_remaining, usage_current, usage_limit,
+			usage_percent, next_reset_date, last_refresh, trial_usage_current,
+			trial_usage_limit, trial_usage_percent, trial_status,
+			trial_expires_at, request_count, error_count, last_used,
+			total_tokens, total_credits
+		FROM accounts`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	c.Accounts = []Account{}
+	for rows.Next() {
+		var a Account
+		var enabledInt int
+		err := rows.Scan(
+			&a.ID, &a.Email, &a.UserId, &a.Nickname, &a.AccessToken, &a.RefreshToken,
+			&a.ClientID, &a.ClientSecret, &a.AuthMethod, &a.Provider, &a.Region,
+			&a.StartUrl, &a.ExpiresAt, &a.MachineId, &a.ProfileArn, &a.ProxyURL,
+			&a.Weight, &a.OverageStatus, &a.OverageCapability, &a.OverageCap,
+			&a.OverageRate, &a.CurrentOverages, &a.OverageCheckedAt, &enabledInt,
+			&a.BanStatus, &a.BanReason, &a.BanTime, &a.SubscriptionType,
+			&a.SubscriptionTitle, &a.DaysRemaining, &a.UsageCurrent, &a.UsageLimit,
+			&a.UsagePercent, &a.NextResetDate, &a.LastRefresh, &a.TrialUsageCurrent,
+			&a.TrialUsageLimit, &a.TrialUsagePercent, &a.TrialStatus,
+			&a.TrialExpiresAt, &a.RequestCount, &a.ErrorCount, &a.LastUsed,
+			&a.TotalTokens, &a.TotalCredits,
+		)
+		if err != nil {
 			return err
 		}
+		a.Enabled = intToBool(enabledInt)
+		c.Accounts = append(c.Accounts, a)
 	}
+
+	// 3. Load API keys
+	keyRows, err := db.Query(`
+		SELECT id, name, key, enabled, migrated, created_at, last_used_at,
+			token_limit, credit_limit, tokens_used, credits_used, requests_count
+		FROM api_keys`)
+	if err != nil {
+		return err
+	}
+	defer keyRows.Close()
+
+	c.ApiKeys = []ApiKeyEntry{}
+	for keyRows.Next() {
+		var k ApiKeyEntry
+		var enabledInt, migratedInt int
+		err := keyRows.Scan(
+			&k.ID, &k.Name, &k.Key, &enabledInt, &migratedInt, &k.CreatedAt, &k.LastUsedAt,
+			&k.TokenLimit, &k.CreditLimit, &k.TokensUsed, &k.CreditsUsed, &k.RequestsCount,
+		)
+		if err != nil {
+			return err
+		}
+		k.Enabled = intToBool(enabledInt)
+		k.Migrated = intToBool(migratedInt)
+		c.ApiKeys = append(c.ApiKeys, k)
+	}
+
+	// 4. Load prompt filter rules
+	ruleRows, err := db.Query(`
+		SELECT id, name, type, match, replace, enabled
+		FROM prompt_filter_rules`)
+	if err != nil {
+		return err
+	}
+	defer ruleRows.Close()
+
+	c.PromptFilterRules = []PromptFilterRule{}
+	for ruleRows.Next() {
+		var r PromptFilterRule
+		var enabledInt int
+		err := ruleRows.Scan(
+			&r.ID, &r.Name, &r.Type, &r.Match, &r.Replace, &enabledInt,
+		)
+		if err != nil {
+			return err
+		}
+		r.Enabled = intToBool(enabledInt)
+		c.PromptFilterRules = append(c.PromptFilterRules, r)
+	}
+
+	cfg = &c
 	return nil
 }
 
-// saveLocked persists cfg to disk. Caller MUST already hold cfgLock.
-// This is identical to Save() (which does not take the lock either) but is named
-// distinctly so call sites that already hold cfgLock are explicit about it.
+// saveLocked persists cfg to SQLite. Caller MUST already hold cfgLock.
 func saveLocked() error {
 	return Save()
 }
 
-// newUUID returns a UUID v4 string. Defined here to avoid pulling extra deps in this file.
+// newUUID returns a UUID v4 string.
 func newUUID() string {
 	return GenerateMachineId()
 }
 
-// Save persists the current configuration to the JSON file.
-// Uses indented formatting for human readability.
+// Save persists the current configuration to the SQLite database inside a transaction.
 func Save() error {
-	data, err := json.MarshalIndent(cfg, "", "  ")
+	if db == nil {
+		return fmt.Errorf("database not initialized")
+	}
+
+	tx, err := db.Begin()
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cfgPath, data, 0600)
+	defer tx.Rollback()
+
+	// 1. Update settings row
+	_, err = tx.Exec(`
+		INSERT OR REPLACE INTO settings (
+			id, password, port, host, api_key, require_api_key,
+			kiro_version, system_version, node_version,
+			thinking_suffix, openai_thinking_format, claude_thinking_format,
+			preferred_endpoint, endpoint_fallback, allow_over_usage, proxy_url,
+			filter_claude_code, filter_env_noise, filter_strip_boundaries,
+			caveman_mode, log_level, total_requests, success_requests,
+			failed_requests, total_tokens, total_credits
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		1, cfg.Password, cfg.Port, cfg.Host, cfg.ApiKey, boolToInt(cfg.RequireApiKey),
+		cfg.KiroVersion, cfg.SystemVersion, cfg.NodeVersion,
+		cfg.ThinkingSuffix, cfg.OpenAIThinkingFormat, cfg.ClaudeThinkingFormat,
+		cfg.PreferredEndpoint, boolPtrToInt(cfg.EndpointFallback), boolToInt(cfg.AllowOverUsage), cfg.ProxyURL,
+		boolToInt(cfg.FilterClaudeCode), boolToInt(cfg.FilterEnvNoise), boolToInt(cfg.FilterStripBoundaries),
+		cfg.CavemanMode, cfg.LogLevel, cfg.TotalRequests, cfg.SuccessRequests,
+		cfg.FailedRequests, cfg.TotalTokens, cfg.TotalCredits,
+	)
+	if err != nil {
+		return err
+	}
+
+	// 2. Clear and re-insert accounts
+	_, err = tx.Exec("DELETE FROM accounts")
+	if err != nil {
+		return err
+	}
+	for _, a := range cfg.Accounts {
+		_, err = tx.Exec(`
+			INSERT INTO accounts (
+				id, email, user_id, nickname, access_token, refresh_token,
+				client_id, client_secret, auth_method, provider, region,
+				start_url, expires_at, machine_id, profile_arn, proxy_url,
+				weight, overage_status, overage_capability, overage_cap,
+				overage_rate, current_overages, overage_checked_at, enabled,
+				ban_status, ban_reason, ban_time, subscription_type,
+				subscription_title, days_remaining, usage_current, usage_limit,
+				usage_percent, next_reset_date, last_refresh, trial_usage_current,
+				trial_usage_limit, trial_usage_percent, trial_status,
+				trial_expires_at, request_count, error_count, last_used,
+				total_tokens, total_credits
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			a.ID, a.Email, a.UserId, a.Nickname, a.AccessToken, a.RefreshToken,
+			a.ClientID, a.ClientSecret, a.AuthMethod, a.Provider, a.Region,
+			a.StartUrl, a.ExpiresAt, a.MachineId, a.ProfileArn, a.ProxyURL,
+			a.Weight, a.OverageStatus, a.OverageCapability, a.OverageCap,
+			a.OverageRate, a.CurrentOverages, a.OverageCheckedAt, boolToInt(a.Enabled),
+			a.BanStatus, a.BanReason, a.BanTime, a.SubscriptionType,
+			a.SubscriptionTitle, a.DaysRemaining, a.UsageCurrent, a.UsageLimit,
+			a.UsagePercent, a.NextResetDate, a.LastRefresh, a.TrialUsageCurrent,
+			a.TrialUsageLimit, a.TrialUsagePercent, a.TrialStatus,
+			a.TrialExpiresAt, a.RequestCount, a.ErrorCount, a.LastUsed,
+			a.TotalTokens, a.TotalCredits,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	// 3. Clear and re-insert API keys
+	_, err = tx.Exec("DELETE FROM api_keys")
+	if err != nil {
+		return err
+	}
+	for _, k := range cfg.ApiKeys {
+		_, err = tx.Exec(`
+			INSERT INTO api_keys (
+				id, name, key, enabled, migrated, created_at, last_used_at,
+				token_limit, credit_limit, tokens_used, credits_used, requests_count
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			k.ID, k.Name, k.Key, boolToInt(k.Enabled), boolToInt(k.Migrated), k.CreatedAt, k.LastUsedAt,
+			k.TokenLimit, k.CreditLimit, k.TokensUsed, k.CreditsUsed, k.RequestsCount,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	// 4. Clear and re-insert prompt filter rules
+	_, err = tx.Exec("DELETE FROM prompt_filter_rules")
+	if err != nil {
+		return err
+	}
+	for _, r := range cfg.PromptFilterRules {
+		_, err = tx.Exec(`
+			INSERT INTO prompt_filter_rules (
+				id, name, type, match, replace, enabled
+			) VALUES (?, ?, ?, ?, ?, ?)`,
+			r.ID, r.Name, r.Type, r.Match, r.Replace, boolToInt(r.Enabled),
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 // SetPassword updates the admin password.

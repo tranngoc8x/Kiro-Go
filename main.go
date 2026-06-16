@@ -28,7 +28,7 @@ import (
 
 func main() {
 	// 配置文件路径，支持环境变量覆盖
-	configPath := "data/config.json"
+	configPath := "data/config.db"
 	if envPath := os.Getenv("CONFIG_PATH"); envPath != "" {
 		configPath = envPath
 	}
