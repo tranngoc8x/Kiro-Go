@@ -23,15 +23,17 @@ const tokenRefreshSkewSeconds int64 = 120
 type Handler struct {
 	pool *pool.AccountPool
 	// 运行时统计 (使用原子操作)
-	totalRequests   int64
-	successRequests int64
-	failedRequests  int64
-	totalTokens     int64
-	totalCredits    float64 // float64 需要用锁保护
-	creditsMu       sync.RWMutex
-	startTime       int64
-	stopRefresh     chan struct{}
-	stopStatsSaver  chan struct{}
+	totalRequests      int64
+	successRequests    int64
+	failedRequests     int64
+	totalTokens        int64
+	totalCredits       float64 // float64 需要用锁保护
+	cavemanRequests    int64
+	cavemanTokensSaved int64
+	creditsMu          sync.RWMutex
+	startTime          int64
+	stopRefresh        chan struct{}
+	stopStatsSaver     chan struct{}
 	// 模型缓存
 	cachedModels    []ModelInfo
 	modelsCacheMu   sync.RWMutex
@@ -213,18 +215,20 @@ func NewHandler() *Handler {
 	// 启动时应用代理配置
 	applyProxyConfig(config.GetProxyURL())
 
-	totalReq, successReq, failedReq, totalTokens, totalCredits := config.GetStats()
+	totalReq, successReq, failedReq, totalTokens, totalCredits, cavemanReq, cavemanSaved := config.GetStats()
 	h := &Handler{
-		pool:            pool.GetPool(),
-		totalRequests:   int64(totalReq),
-		successRequests: int64(successReq),
-		failedRequests:  int64(failedReq),
-		totalTokens:     int64(totalTokens),
-		totalCredits:    totalCredits,
-		startTime:       time.Now().Unix(),
-		stopRefresh:     make(chan struct{}),
-		stopStatsSaver:  make(chan struct{}),
-		promptCache:     newPromptCacheTracker(defaultPromptCacheTTL),
+		pool:               pool.GetPool(),
+		totalRequests:      int64(totalReq),
+		successRequests:    int64(successReq),
+		failedRequests:     int64(failedReq),
+		totalTokens:        int64(totalTokens),
+		totalCredits:       totalCredits,
+		cavemanRequests:    int64(cavemanReq),
+		cavemanTokensSaved: int64(cavemanSaved),
+		startTime:          time.Now().Unix(),
+		stopRefresh:        make(chan struct{}),
+		stopStatsSaver:     make(chan struct{}),
+		promptCache:        newPromptCacheTracker(defaultPromptCacheTTL),
 	}
 	// 启动后台刷新
 	go h.backgroundRefresh()
@@ -807,6 +811,7 @@ func (h *Handler) handleClaudeMessagesInternal(w http.ResponseWriter, r *http.Re
 	thinkingCfg := config.GetThinkingConfig()
 	actualModel, thinking := resolveClaudeThinkingMode(req.Model, req.Thinking, thinkingCfg.Suffix)
 	req.Model = actualModel
+	req.CavemanOverride = r.Header.Get("X-Caveman-Mode")
 	effectiveReq := cloneClaudeRequestForThinking(&req, thinking)
 	thinkingResponseOpts := resolveClaudeThinkingResponseOptions(req.Thinking, thinkingCfg.ClaudeFormat)
 	estimatedInputTokens := estimateClaudeRequestInputTokens(effectiveReq)
@@ -1232,9 +1237,9 @@ func (h *Handler) handleClaudeStream(w http.ResponseWriter, payload *KiroPayload
 		}
 		outputTokens = estimateClaudeOutputTokens(outputContent, thinkingOutput, toolUses)
 
-		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits)
+		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits, payload.CavemanActive, estimateCavemanTokensSaved(outputTokens, payload.CavemanMode))
 		h.pool.RecordSuccess(account.ID)
-		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits)
+		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits, payload.CavemanActive, estimateCavemanTokensSaved(outputTokens, payload.CavemanMode))
 		h.promptCache.Update(account.ID, cacheProfile)
 
 		stopReason := "end_turn"
@@ -1296,6 +1301,8 @@ func (h *Handler) saveStats() {
 		int(atomic.LoadInt64(&h.failedRequests)),
 		int(atomic.LoadInt64(&h.totalTokens)),
 		h.getCredits(),
+		int(atomic.LoadInt64(&h.cavemanRequests)),
+		int(atomic.LoadInt64(&h.cavemanTokensSaved)),
 	)
 }
 
@@ -1314,18 +1321,22 @@ func (h *Handler) addCredits(credits float64) {
 }
 
 // 统计记录 (使用原子操作)
-func (h *Handler) recordSuccess(inputTokens, outputTokens int, credits float64) {
+func (h *Handler) recordSuccess(inputTokens, outputTokens int, credits float64, cavemanActive bool, cavemanSaved int) {
 	atomic.AddInt64(&h.totalRequests, 1)
 	atomic.AddInt64(&h.successRequests, 1)
 	atomic.AddInt64(&h.totalTokens, int64(inputTokens+outputTokens))
 	h.addCredits(credits)
+	if cavemanActive {
+		atomic.AddInt64(&h.cavemanRequests, 1)
+		atomic.AddInt64(&h.cavemanTokensSaved, int64(cavemanSaved))
+	}
 }
 
 // recordSuccessForApiKey is recordSuccess + per-API-key usage attribution.
 // When apiKeyID is empty (legacy single-key path or unauthenticated path), only the
 // global counters are updated. Persistence errors are logged but do not propagate.
-func (h *Handler) recordSuccessForApiKey(apiKeyID string, inputTokens, outputTokens int, credits float64) {
-	h.recordSuccess(inputTokens, outputTokens, credits)
+func (h *Handler) recordSuccessForApiKey(apiKeyID string, inputTokens, outputTokens int, credits float64, cavemanActive bool, cavemanSaved int) {
+	h.recordSuccess(inputTokens, outputTokens, credits, cavemanActive, cavemanSaved)
 	if apiKeyID == "" {
 		return
 	}
@@ -1412,9 +1423,9 @@ func (h *Handler) handleClaudeNonStream(w http.ResponseWriter, payload *KiroPayl
 		}
 		outputTokens = estimateClaudeOutputTokens(finalContent, rawThinkingContent, toolUses)
 
-		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits)
+		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits, payload.CavemanActive, estimateCavemanTokensSaved(outputTokens, payload.CavemanMode))
 		h.pool.RecordSuccess(account.ID)
-		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits)
+		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits, payload.CavemanActive, estimateCavemanTokensSaved(outputTokens, payload.CavemanMode))
 		h.promptCache.Update(account.ID, cacheProfile)
 
 		responseThinkingContent := rawThinkingContent
@@ -1498,6 +1509,7 @@ func (h *Handler) handleOpenAIChat(w http.ResponseWriter, r *http.Request) {
 	thinkingCfg := config.GetThinkingConfig()
 	actualModel, thinking := ParseModelAndThinking(req.Model, thinkingCfg.Suffix)
 	req.Model = actualModel
+	req.CavemanOverride = r.Header.Get("X-Caveman-Mode")
 	estimatedInputTokens := estimateOpenAIRequestInputTokens(&req)
 
 	kiroPayload := OpenAIToKiro(&req, thinking)
@@ -1858,9 +1870,9 @@ func (h *Handler) handleOpenAIStream(w http.ResponseWriter, payload *KiroPayload
 			outputTokens += estimateApproxTokens(tc.Function.Arguments)
 		}
 
-		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits)
+		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits, payload.CavemanActive, estimateCavemanTokensSaved(outputTokens, payload.CavemanMode))
 		h.pool.RecordSuccess(account.ID)
-		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits)
+		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits, payload.CavemanActive, estimateCavemanTokensSaved(outputTokens, payload.CavemanMode))
 
 		finishReason := "stop"
 		if len(toolCalls) > 0 {
@@ -1961,9 +1973,9 @@ func (h *Handler) handleOpenAINonStream(w http.ResponseWriter, payload *KiroPayl
 		}
 		outputTokens = estimateOpenAIOutputTokens(finalContent, reasoningContent, toolUses)
 
-		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits)
+		h.recordSuccessForApiKey(apiKeyID, inputTokens, outputTokens, credits, payload.CavemanActive, estimateCavemanTokensSaved(outputTokens, payload.CavemanMode))
 		h.pool.RecordSuccess(account.ID)
-		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits)
+		h.pool.UpdateStats(account.ID, inputTokens+outputTokens, credits, payload.CavemanActive, estimateCavemanTokensSaved(outputTokens, payload.CavemanMode))
 
 		thinkingFormat := config.GetThinkingConfig().OpenAIFormat
 		resp := KiroToOpenAIResponseWithReasoning(finalContent, reasoningContent, toolUses, inputTokens, outputTokens, model, thinkingFormat)
@@ -2219,6 +2231,8 @@ func (h *Handler) apiGetAccounts(w http.ResponseWriter, r *http.Request) {
 			"errorCount":        stats.ErrorCount,
 			"totalTokens":       stats.TotalTokens,
 			"totalCredits":      stats.TotalCredits,
+			"cavemanRequests":    stats.CavemanRequests,
+			"cavemanTokensSaved": stats.CavemanTokensSaved,
 			"lastUsed":          stats.LastUsed,
 		}
 	}
@@ -2886,11 +2900,13 @@ func (h *Handler) apiGetStatus(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"accounts":        h.pool.Count(),
 		"available":       h.pool.AvailableCount(),
-		"totalRequests":   h.totalRequests,
-		"successRequests": h.successRequests,
-		"failedRequests":  h.failedRequests,
-		"totalTokens":     h.totalTokens,
-		"totalCredits":    h.totalCredits,
+		"totalRequests":   atomic.LoadInt64(&h.totalRequests),
+		"successRequests": atomic.LoadInt64(&h.successRequests),
+		"failedRequests":  atomic.LoadInt64(&h.failedRequests),
+		"totalTokens":     atomic.LoadInt64(&h.totalTokens),
+		"totalCredits":    h.getCredits(),
+		"cavemanRequests": atomic.LoadInt64(&h.cavemanRequests),
+		"cavemanTokensSaved": atomic.LoadInt64(&h.cavemanTokensSaved),
 		"uptime":          time.Now().Unix() - h.startTime,
 	})
 }
@@ -3031,6 +3047,8 @@ func (h *Handler) apiGetStats(w http.ResponseWriter, r *http.Request) {
 		"failedRequests":  atomic.LoadInt64(&h.failedRequests),
 		"totalTokens":     atomic.LoadInt64(&h.totalTokens),
 		"totalCredits":    h.getCredits(),
+		"cavemanRequests": atomic.LoadInt64(&h.cavemanRequests),
+		"cavemanTokensSaved": atomic.LoadInt64(&h.cavemanTokensSaved),
 		"uptime":          time.Now().Unix() - h.startTime,
 	})
 }
@@ -3040,10 +3058,12 @@ func (h *Handler) apiResetStats(w http.ResponseWriter, r *http.Request) {
 	atomic.StoreInt64(&h.successRequests, 0)
 	atomic.StoreInt64(&h.failedRequests, 0)
 	atomic.StoreInt64(&h.totalTokens, 0)
+	atomic.StoreInt64(&h.cavemanRequests, 0)
+	atomic.StoreInt64(&h.cavemanTokensSaved, 0)
 	h.creditsMu.Lock()
 	h.totalCredits = 0
 	h.creditsMu.Unlock()
-	config.UpdateStats(0, 0, 0, 0, 0)
+	config.UpdateStats(0, 0, 0, 0, 0, 0, 0)
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
@@ -3295,6 +3315,8 @@ func (h *Handler) apiGetAccountFull(w http.ResponseWriter, r *http.Request, id s
 		"errorCount":        stats.ErrorCount,
 		"totalTokens":       stats.TotalTokens,
 		"totalCredits":      stats.TotalCredits,
+		"cavemanRequests":    stats.CavemanRequests,
+		"cavemanTokensSaved": stats.CavemanTokensSaved,
 		"lastUsed":          stats.LastUsed,
 	}
 

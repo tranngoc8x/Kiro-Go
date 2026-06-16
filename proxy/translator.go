@@ -120,16 +120,17 @@ func MapModel(model string) string {
 // ==================== Claude API 类型 ====================
 
 type ClaudeRequest struct {
-	Model       string                `json:"model"`
-	Messages    []ClaudeMessage       `json:"messages"`
-	MaxTokens   int                   `json:"max_tokens"`
-	Temperature float64               `json:"temperature,omitempty"`
-	TopP        float64               `json:"top_p,omitempty"`
-	Stream      bool                  `json:"stream,omitempty"`
-	System      interface{}           `json:"system,omitempty"` // string or []SystemBlock
-	Thinking    *ClaudeThinkingConfig `json:"thinking,omitempty"`
-	Tools       []ClaudeTool          `json:"tools,omitempty"`
-	ToolChoice  interface{}           `json:"tool_choice,omitempty"`
+	Model           string                `json:"model"`
+	Messages        []ClaudeMessage       `json:"messages"`
+	MaxTokens       int                   `json:"max_tokens"`
+	Temperature     float64               `json:"temperature,omitempty"`
+	TopP            float64               `json:"top_p,omitempty"`
+	Stream          bool                  `json:"stream,omitempty"`
+	System          interface{}           `json:"system,omitempty"` // string or []SystemBlock
+	Thinking        *ClaudeThinkingConfig `json:"thinking,omitempty"`
+	Tools           []ClaudeTool          `json:"tools,omitempty"`
+	ToolChoice      interface{}           `json:"tool_choice,omitempty"`
+	CavemanOverride string                `json:"-"`
 }
 
 type ClaudeThinkingConfig struct {
@@ -200,8 +201,14 @@ func ClaudeToKiro(req *ClaudeRequest, thinking bool) *KiroPayload {
 	modelID := MapModel(req.Model)
 	origin := "AI_EDITOR"
 
+	mode := req.CavemanOverride
+	if mode == "" {
+		mode = config.GetCavemanMode()
+	}
+	isCavemanActive := mode != "" && mode != "off"
+
 	// 提取系统提示
-	systemPrompt := buildClaudeSystemPrompt(req.System, thinking)
+	systemPrompt := buildClaudeSystemPrompt(req.System, thinking, req.CavemanOverride)
 
 	// 构建历史消息
 	history := make([]KiroHistoryMessage, 0)
@@ -303,6 +310,8 @@ func ClaudeToKiro(req *ClaudeRequest, thinking bool) *KiroPayload {
 	// 构建 payload
 	payload := &KiroPayload{}
 	payload.ToolNameMap = toolNameMap
+	payload.CavemanActive = isCavemanActive
+	payload.CavemanMode = mode
 	payload.ConversationState.ChatTriggerType = "MANUAL"
 	payload.ConversationState.AgentTaskType = "vibe"
 	payload.ConversationState.AgentContinuationId = uuid.New().String()
@@ -344,9 +353,9 @@ func ClaudeToKiro(req *ClaudeRequest, thinking bool) *KiroPayload {
 	return payload
 }
 
-func buildClaudeSystemPrompt(system interface{}, thinking bool) string {
+func buildClaudeSystemPrompt(system interface{}, thinking bool, cavemanOverride string) string {
 	systemPrompt := extractSystemPrompt(system)
-	systemPrompt = applyPromptFilters(systemPrompt)
+	systemPrompt = applyPromptFiltersWithCaveman(systemPrompt, cavemanOverride)
 	if !thinking {
 		return systemPrompt
 	}
@@ -1002,13 +1011,14 @@ func KiroToClaudeResponse(content, thinkingContent string, includeEmptyThinkingB
 // ==================== OpenAI API 类型 ====================
 
 type OpenAIRequest struct {
-	Model       string          `json:"model"`
-	Messages    []OpenAIMessage `json:"messages"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature float64         `json:"temperature,omitempty"`
-	TopP        float64         `json:"top_p,omitempty"`
-	Stream      bool            `json:"stream,omitempty"`
-	Tools       []OpenAITool    `json:"tools,omitempty"`
+	Model           string          `json:"model"`
+	Messages        []OpenAIMessage `json:"messages"`
+	MaxTokens       int             `json:"max_tokens,omitempty"`
+	Temperature     float64         `json:"temperature,omitempty"`
+	TopP            float64         `json:"top_p,omitempty"`
+	Stream          bool            `json:"stream,omitempty"`
+	Tools           []OpenAITool    `json:"tools,omitempty"`
+	CavemanOverride string          `json:"-"`
 }
 
 type OpenAIMessage struct {
@@ -1111,6 +1121,12 @@ func OpenAIToKiro(req *OpenAIRequest, thinking bool) *KiroPayload {
 	modelID := MapModel(req.Model)
 	origin := "AI_EDITOR"
 
+	mode := req.CavemanOverride
+	if mode == "" {
+		mode = config.GetCavemanMode()
+	}
+	isCavemanActive := mode != "" && mode != "off"
+
 	// 提取系统提示
 	var systemPrompt string
 	var nonSystemMessages []OpenAIMessage
@@ -1124,6 +1140,9 @@ func OpenAIToKiro(req *OpenAIRequest, thinking bool) *KiroPayload {
 			nonSystemMessages = append(nonSystemMessages, msg)
 		}
 	}
+
+	// Apply prompt filters (with caveman override)
+	systemPrompt = applyPromptFiltersWithCaveman(systemPrompt, req.CavemanOverride)
 
 	// 如果启用 thinking 模式，注入 thinking 提示
 	if thinking {
@@ -1273,6 +1292,8 @@ func OpenAIToKiro(req *OpenAIRequest, thinking bool) *KiroPayload {
 	// 构建 payload
 	payload := &KiroPayload{}
 	payload.ConversationState.ChatTriggerType = "MANUAL"
+	payload.CavemanActive = isCavemanActive
+	payload.CavemanMode = mode
 	payload.ConversationState.ConversationID = buildConversationID(modelID, systemPrompt, firstOpenAIConversationAnchor(nonSystemMessages))
 	payload.ConversationState.CurrentMessage.UserInputMessage = KiroUserInputMessage{
 		Content: finalContent,

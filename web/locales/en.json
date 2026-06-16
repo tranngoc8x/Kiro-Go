@@ -444,5 +444,10 @@
   "settings.cavemanWenyan": "Wenyan (文言) — classical Chinese style",
   "settings.cavemanHint": "Injects compact-response instructions into every system prompt. Reduces AI output tokens by up to 75% while preserving technical accuracy.",
   "settings.saveCaveman": "Save Caveman Settings",
-  "settings.cavemanSaved": "Caveman mode saved"
+  "settings.cavemanSaved": "Caveman mode saved",
+  "settings.cavemanStats": "Caveman Mode Statistics",
+  "settings.cavemanRequests": "Caveman Requests",
+  "settings.cavemanSavedTokens": "Est. Saved Tokens",
+  "detail.cavemanRequests": "Caveman Requests",
+  "detail.cavemanTokensSaved": "Est. Saved Tokens"
 }

@@ -676,6 +676,12 @@
     $('statFailed').textContent = d.failedRequests || 0;
     $('statTokens').textContent = formatNum(d.totalTokens || 0);
     $('statCredits').textContent = (d.totalCredits || 0).toFixed(1);
+    if ($('globalCavemanRequests')) {
+      $('globalCavemanRequests').textContent = d.cavemanRequests || 0;
+    }
+    if ($('globalCavemanTokensSaved')) {
+      $('globalCavemanTokensSaved').textContent = formatNum(d.cavemanTokensSaved || 0);
+    }
   }
   async function loadAccounts() {
     const res = await api('/accounts');
@@ -1121,6 +1127,8 @@
       detailItem(t('detail.errorCount'), a.errorCount || 0) +
       detailItem(t('detail.totalTokens'), formatNum(a.totalTokens || 0)) +
       detailItem(t('detail.totalCredits'), (a.totalCredits || 0).toFixed(2)) +
+      detailItem(t('detail.cavemanRequests'), a.cavemanRequests || 0) +
+      detailItem(t('detail.cavemanTokensSaved'), formatNum(a.cavemanTokensSaved || 0)) +
       '</div></div>' +
 
       '<div class="detail-section">' +

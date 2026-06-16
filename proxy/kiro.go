@@ -163,6 +163,10 @@ type KiroPayload struct {
 	// in tool_use responses so the client can match them to its tool registry.
 	// Not serialized to the Kiro API request body.
 	ToolNameMap map[string]string `json:"-"`
+
+	// Caveman stats fields passed to response handlers.
+	CavemanActive bool   `json:"-"`
+	CavemanMode   string `json:"-"`
 }
 
 type KiroUserInputMessage struct {

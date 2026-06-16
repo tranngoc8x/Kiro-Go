@@ -432,13 +432,14 @@ func (p *AccountPool) AvailableCount() int {
 }
 
 // UpdateStats 更新账号统计
-func (p *AccountPool) UpdateStats(id string, tokens int, credits float64) {
+func (p *AccountPool) UpdateStats(id string, tokens int, credits float64, cavemanActive bool, cavemanSaved int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var updated bool
 	var requestCount, errorCount, totalTokens int
 	var totalCredits float64
 	var lastUsed int64
+	var cavemanRequests, cavemanTokensSaved int
 	for i := range p.accounts {
 		if p.accounts[i].ID == id {
 			if !updated {
@@ -446,12 +447,18 @@ func (p *AccountPool) UpdateStats(id string, tokens int, credits float64) {
 				p.accounts[i].TotalTokens += tokens
 				p.accounts[i].TotalCredits += credits
 				p.accounts[i].LastUsed = time.Now().Unix()
+				if cavemanActive {
+					p.accounts[i].CavemanRequests++
+					p.accounts[i].CavemanTokensSaved += cavemanSaved
+				}
 
 				requestCount = p.accounts[i].RequestCount
 				errorCount = p.accounts[i].ErrorCount
 				totalTokens = p.accounts[i].TotalTokens
 				totalCredits = p.accounts[i].TotalCredits
 				lastUsed = p.accounts[i].LastUsed
+				cavemanRequests = p.accounts[i].CavemanRequests
+				cavemanTokensSaved = p.accounts[i].CavemanTokensSaved
 				updated = true
 				continue
 			}
@@ -460,10 +467,12 @@ func (p *AccountPool) UpdateStats(id string, tokens int, credits float64) {
 			p.accounts[i].TotalTokens = totalTokens
 			p.accounts[i].TotalCredits = totalCredits
 			p.accounts[i].LastUsed = lastUsed
+			p.accounts[i].CavemanRequests = cavemanRequests
+			p.accounts[i].CavemanTokensSaved = cavemanTokensSaved
 		}
 	}
 	if updated {
-		go config.UpdateAccountStats(id, requestCount, errorCount, totalTokens, totalCredits, lastUsed)
+		go config.UpdateAccountStats(id, requestCount, errorCount, totalTokens, totalCredits, lastUsed, cavemanRequests, cavemanTokensSaved)
 	}
 }
 

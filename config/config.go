@@ -107,11 +107,13 @@ type Account struct {
 	TrialExpiresAt    int64   `json:"trialExpiresAt,omitempty"`    // Trial expiration timestamp (Unix seconds)
 
 	// Runtime statistics (updated during operation)
-	RequestCount int     `json:"requestCount,omitempty"` // Total requests processed
-	ErrorCount   int     `json:"errorCount,omitempty"`   // Total errors encountered
-	LastUsed     int64   `json:"lastUsed,omitempty"`     // Last request timestamp
-	TotalTokens  int     `json:"totalTokens,omitempty"`  // Cumulative tokens processed
-	TotalCredits float64 `json:"totalCredits,omitempty"` // Cumulative credits consumed
+	RequestCount       int     `json:"requestCount,omitempty"`       // Total requests processed
+	ErrorCount         int     `json:"errorCount,omitempty"`         // Total errors encountered
+	LastUsed           int64   `json:"lastUsed,omitempty"`           // Last request timestamp
+	TotalTokens        int     `json:"totalTokens,omitempty"`        // Cumulative tokens processed
+	TotalCredits       float64 `json:"totalCredits,omitempty"`       // Cumulative credits consumed
+	CavemanRequests    int     `json:"cavemanRequests,omitempty"`    // Total requests utilizing caveman mode
+	CavemanTokensSaved int     `json:"cavemanTokensSaved,omitempty"` // Total estimated tokens saved
 }
 
 // PromptFilterRule defines a single custom prompt sanitization rule.
@@ -214,11 +216,13 @@ type Config struct {
 	LogLevel string `json:"logLevel,omitempty"`
 
 	// Global statistics (persisted across restarts)
-	TotalRequests   int     `json:"totalRequests,omitempty"`   // Total API requests received
-	SuccessRequests int     `json:"successRequests,omitempty"` // Successful requests count
-	FailedRequests  int     `json:"failedRequests,omitempty"`  // Failed requests count
-	TotalTokens     int     `json:"totalTokens,omitempty"`     // Total tokens processed
-	TotalCredits    float64 `json:"totalCredits,omitempty"`    // Total credits consumed
+	TotalRequests      int     `json:"totalRequests,omitempty"`      // Total API requests received
+	SuccessRequests    int     `json:"successRequests,omitempty"`    // Successful requests count
+	FailedRequests     int     `json:"failedRequests,omitempty"`     // Failed requests count
+	TotalTokens        int     `json:"totalTokens,omitempty"`        // Total tokens processed
+	TotalCredits       float64 `json:"totalCredits,omitempty"`       // Total credits consumed
+	CavemanRequests    int     `json:"cavemanRequests,omitempty"`    // Total requests utilizing caveman mode
+	CavemanTokensSaved int     `json:"cavemanTokensSaved,omitempty"` // Total estimated tokens saved
 }
 
 // AccountInfo contains account metadata retrieved from Kiro API.
@@ -303,7 +307,9 @@ func initDB(dbPath string) (*sql.DB, error) {
 			success_requests INTEGER NOT NULL DEFAULT 0,
 			failed_requests INTEGER NOT NULL DEFAULT 0,
 			total_tokens INTEGER NOT NULL DEFAULT 0,
-			total_credits REAL NOT NULL DEFAULT 0.0
+			total_credits REAL NOT NULL DEFAULT 0.0,
+			caveman_requests INTEGER NOT NULL DEFAULT 0,
+			caveman_tokens_saved INTEGER NOT NULL DEFAULT 0
 		);`,
 		`CREATE TABLE IF NOT EXISTS accounts (
 			id TEXT PRIMARY KEY,
@@ -350,7 +356,9 @@ func initDB(dbPath string) (*sql.DB, error) {
 			error_count INTEGER NOT NULL DEFAULT 0,
 			last_used INTEGER NOT NULL DEFAULT 0,
 			total_tokens INTEGER NOT NULL DEFAULT 0,
-			total_credits REAL NOT NULL DEFAULT 0.0
+			total_credits REAL NOT NULL DEFAULT 0.0,
+			caveman_requests INTEGER NOT NULL DEFAULT 0,
+			caveman_tokens_saved INTEGER NOT NULL DEFAULT 0
 		);`,
 		`CREATE TABLE IF NOT EXISTS api_keys (
 			id TEXT PRIMARY KEY,
@@ -382,6 +390,12 @@ func initDB(dbPath string) (*sql.DB, error) {
 			return nil, err
 		}
 	}
+
+	// Run migrations to add Caveman Mode statistics columns if they don't exist
+	_, _ = dbConn.Exec("ALTER TABLE settings ADD COLUMN caveman_requests INTEGER NOT NULL DEFAULT 0;")
+	_, _ = dbConn.Exec("ALTER TABLE settings ADD COLUMN caveman_tokens_saved INTEGER NOT NULL DEFAULT 0;")
+	_, _ = dbConn.Exec("ALTER TABLE accounts ADD COLUMN caveman_requests INTEGER NOT NULL DEFAULT 0;")
+	_, _ = dbConn.Exec("ALTER TABLE accounts ADD COLUMN caveman_tokens_saved INTEGER NOT NULL DEFAULT 0;")
 
 	// Insert default settings row if settings table is empty
 	var count int
@@ -545,7 +559,8 @@ func Load() error {
 			preferred_endpoint, endpoint_fallback, allow_over_usage, proxy_url,
 			filter_claude_code, filter_env_noise, filter_strip_boundaries,
 			caveman_mode, log_level, total_requests, success_requests,
-			failed_requests, total_tokens, total_credits
+			failed_requests, total_tokens, total_credits, caveman_requests,
+			caveman_tokens_saved
 		FROM settings WHERE id = 1`).Scan(
 		&c.Password, &c.Port, &c.Host, &c.ApiKey, &requireApiKeyInt,
 		&c.KiroVersion, &c.SystemVersion, &c.NodeVersion,
@@ -553,7 +568,8 @@ func Load() error {
 		&c.PreferredEndpoint, &endpointFallbackInt, &allowOverUsageInt, &c.ProxyURL,
 		&filterClaudeCodeInt, &filterEnvNoiseInt, &filterStripBoundariesInt,
 		&c.CavemanMode, &c.LogLevel, &c.TotalRequests, &c.SuccessRequests,
-		&c.FailedRequests, &c.TotalTokens, &c.TotalCredits,
+		&c.FailedRequests, &c.TotalTokens, &c.TotalCredits, &c.CavemanRequests,
+		&c.CavemanTokensSaved,
 	)
 	if err != nil {
 		return err
@@ -578,7 +594,7 @@ func Load() error {
 			usage_percent, next_reset_date, last_refresh, trial_usage_current,
 			trial_usage_limit, trial_usage_percent, trial_status,
 			trial_expires_at, request_count, error_count, last_used,
-			total_tokens, total_credits
+			total_tokens, total_credits, caveman_requests, caveman_tokens_saved
 		FROM accounts`)
 	if err != nil {
 		return err
@@ -600,7 +616,7 @@ func Load() error {
 			&a.UsagePercent, &a.NextResetDate, &a.LastRefresh, &a.TrialUsageCurrent,
 			&a.TrialUsageLimit, &a.TrialUsagePercent, &a.TrialStatus,
 			&a.TrialExpiresAt, &a.RequestCount, &a.ErrorCount, &a.LastUsed,
-			&a.TotalTokens, &a.TotalCredits,
+			&a.TotalTokens, &a.TotalCredits, &a.CavemanRequests, &a.CavemanTokensSaved,
 		)
 		if err != nil {
 			return err
@@ -693,15 +709,17 @@ func Save() error {
 			preferred_endpoint, endpoint_fallback, allow_over_usage, proxy_url,
 			filter_claude_code, filter_env_noise, filter_strip_boundaries,
 			caveman_mode, log_level, total_requests, success_requests,
-			failed_requests, total_tokens, total_credits
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			failed_requests, total_tokens, total_credits, caveman_requests,
+			caveman_tokens_saved
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		1, cfg.Password, cfg.Port, cfg.Host, cfg.ApiKey, boolToInt(cfg.RequireApiKey),
 		cfg.KiroVersion, cfg.SystemVersion, cfg.NodeVersion,
 		cfg.ThinkingSuffix, cfg.OpenAIThinkingFormat, cfg.ClaudeThinkingFormat,
 		cfg.PreferredEndpoint, boolPtrToInt(cfg.EndpointFallback), boolToInt(cfg.AllowOverUsage), cfg.ProxyURL,
 		boolToInt(cfg.FilterClaudeCode), boolToInt(cfg.FilterEnvNoise), boolToInt(cfg.FilterStripBoundaries),
 		cfg.CavemanMode, cfg.LogLevel, cfg.TotalRequests, cfg.SuccessRequests,
-		cfg.FailedRequests, cfg.TotalTokens, cfg.TotalCredits,
+		cfg.FailedRequests, cfg.TotalTokens, cfg.TotalCredits, cfg.CavemanRequests,
+		cfg.CavemanTokensSaved,
 	)
 	if err != nil {
 		return err
@@ -725,8 +743,8 @@ func Save() error {
 				usage_percent, next_reset_date, last_refresh, trial_usage_current,
 				trial_usage_limit, trial_usage_percent, trial_status,
 				trial_expires_at, request_count, error_count, last_used,
-				total_tokens, total_credits
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				total_tokens, total_credits, caveman_requests, caveman_tokens_saved
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			a.ID, a.Email, a.UserId, a.Nickname, a.AccessToken, a.RefreshToken,
 			a.ClientID, a.ClientSecret, a.AuthMethod, a.Provider, a.Region,
 			a.StartUrl, a.ExpiresAt, a.MachineId, a.ProfileArn, a.ProxyURL,
@@ -737,7 +755,7 @@ func Save() error {
 			a.UsagePercent, a.NextResetDate, a.LastRefresh, a.TrialUsageCurrent,
 			a.TrialUsageLimit, a.TrialUsagePercent, a.TrialStatus,
 			a.TrialExpiresAt, a.RequestCount, a.ErrorCount, a.LastUsed,
-			a.TotalTokens, a.TotalCredits,
+			a.TotalTokens, a.TotalCredits, a.CavemanRequests, a.CavemanTokensSaved,
 		)
 		if err != nil {
 			return err
@@ -1019,7 +1037,7 @@ func UpdateSettingsPatch(apiKey *string, requireApiKey *bool, password string) e
 	return Save()
 }
 
-func UpdateStats(totalReq, successReq, failedReq, totalTokens int, totalCredits float64) error {
+func UpdateStats(totalReq, successReq, failedReq, totalTokens int, totalCredits float64, cavemanReq, cavemanSaved int) error {
 	cfgLock.Lock()
 	defer cfgLock.Unlock()
 	cfg.TotalRequests = totalReq
@@ -1027,16 +1045,18 @@ func UpdateStats(totalReq, successReq, failedReq, totalTokens int, totalCredits 
 	cfg.FailedRequests = failedReq
 	cfg.TotalTokens = totalTokens
 	cfg.TotalCredits = totalCredits
+	cfg.CavemanRequests = cavemanReq
+	cfg.CavemanTokensSaved = cavemanSaved
 	return Save()
 }
 
-func GetStats() (int, int, int, int, float64) {
+func GetStats() (int, int, int, int, float64, int, int) {
 	cfgLock.RLock()
 	defer cfgLock.RUnlock()
-	return cfg.TotalRequests, cfg.SuccessRequests, cfg.FailedRequests, cfg.TotalTokens, cfg.TotalCredits
+	return cfg.TotalRequests, cfg.SuccessRequests, cfg.FailedRequests, cfg.TotalTokens, cfg.TotalCredits, cfg.CavemanRequests, cfg.CavemanTokensSaved
 }
 
-func UpdateAccountStats(id string, requestCount, errorCount, totalTokens int, totalCredits float64, lastUsed int64) error {
+func UpdateAccountStats(id string, requestCount, errorCount, totalTokens int, totalCredits float64, lastUsed int64, cavemanRequests, cavemanTokensSaved int) error {
 	cfgLock.Lock()
 	defer cfgLock.Unlock()
 	for i, a := range cfg.Accounts {
@@ -1046,6 +1066,8 @@ func UpdateAccountStats(id string, requestCount, errorCount, totalTokens int, to
 			cfg.Accounts[i].TotalTokens = totalTokens
 			cfg.Accounts[i].TotalCredits = totalCredits
 			cfg.Accounts[i].LastUsed = lastUsed
+			cfg.Accounts[i].CavemanRequests = cavemanRequests
+			cfg.Accounts[i].CavemanTokensSaved = cavemanTokensSaved
 			return Save()
 		}
 	}

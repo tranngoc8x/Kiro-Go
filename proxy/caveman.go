@@ -77,8 +77,20 @@ func injectCavemanInstructions(prompt, mode string) string {
 	if strings.Contains(prompt, "RESPONSE STYLE:") || strings.Contains(prompt, "Talk like caveman") {
 		return prompt
 	}
-	if prompt == "" {
-		return instructions
-	}
 	return instructions + "\n\n" + prompt
+}
+
+// estimateCavemanTokensSaved estimates the number of tokens saved based on the output tokens and caveman mode.
+func estimateCavemanTokensSaved(outputTokens int, mode string) int {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case CavemanModeLite:
+		return int(float64(outputTokens) * 0.25)
+	case CavemanModeFull, "":
+		return outputTokens * 3
+	case CavemanModeWenyan:
+		return outputTokens * 3
+	case CavemanModeUltra:
+		return outputTokens * 6
+	}
+	return 0
 }
