@@ -65,14 +65,9 @@
     ta.readOnly = true;
     ta.className = 'clipboard-proxy';
     document.body.appendChild(ta);
-    const range = document.createRange();
-    range.selectNodeContents(ta);
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    ta.setSelectionRange(0, str.length);
+    ta.select();
+    ta.focus();
     document.execCommand('copy');
-    sel.removeAllRanges();
     document.body.removeChild(ta);
   }
   function renderEndpointCode(id, value) {
