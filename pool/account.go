@@ -396,6 +396,18 @@ func (p *AccountPool) UpdateToken(id, accessToken, refreshToken string, expiresA
 	}
 }
 
+// UpdateProfileArn 更新账号 ProfileArn
+func (p *AccountPool) UpdateProfileArn(id, profileArn string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := range p.accounts {
+		if p.accounts[i].ID == id {
+			p.accounts[i].ProfileArn = profileArn
+		}
+	}
+}
+
+
 // Count 返回账号总数
 func (p *AccountPool) Count() int {
 	p.mu.RLock()

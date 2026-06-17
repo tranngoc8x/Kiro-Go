@@ -287,6 +287,7 @@ func (h *Handler) refreshAllAccounts() {
 			if profileArn != "" {
 				account.ProfileArn = profileArn
 				config.UpdateAccountProfileArn(account.ID, profileArn)
+				h.pool.UpdateProfileArn(account.ID, profileArn)
 			}
 		}
 
@@ -2006,7 +2007,7 @@ func (h *Handler) sendOpenAIError(w http.ResponseWriter, status int, errType, me
 
 // ensureValidToken 确保 token 有效
 func (h *Handler) ensureValidToken(account *config.Account) error {
-	if account.ExpiresAt == 0 || time.Now().Unix() < account.ExpiresAt-tokenRefreshSkewSeconds {
+	if account.AccessToken != "" && (account.ExpiresAt == 0 || time.Now().Unix() < account.ExpiresAt-tokenRefreshSkewSeconds) {
 		return nil
 	}
 
@@ -2019,7 +2020,7 @@ func (h *Handler) ensureValidToken(account *config.Account) error {
 		account.RefreshToken = latest.RefreshToken
 		account.ExpiresAt = latest.ExpiresAt
 		account.ProfileArn = latest.ProfileArn
-		if account.ExpiresAt == 0 || time.Now().Unix() < account.ExpiresAt-tokenRefreshSkewSeconds {
+		if account.AccessToken != "" && (account.ExpiresAt == 0 || time.Now().Unix() < account.ExpiresAt-tokenRefreshSkewSeconds) {
 			return nil
 		}
 	}
@@ -2039,6 +2040,7 @@ func (h *Handler) ensureValidToken(account *config.Account) error {
 	if profileArn != "" {
 		account.ProfileArn = profileArn
 		config.UpdateAccountProfileArn(account.ID, profileArn)
+		h.pool.UpdateProfileArn(account.ID, profileArn)
 	}
 
 	// 持久化
@@ -2511,6 +2513,7 @@ func (h *Handler) apiBatchAccounts(w http.ResponseWriter, r *http.Request) {
 					if profileArn != "" {
 						account.ProfileArn = profileArn
 						config.UpdateAccountProfileArn(id, profileArn)
+						h.pool.UpdateProfileArn(id, profileArn)
 					}
 					h.pool.UpdateToken(id, newAccess, newRefresh, newExpires)
 				}
@@ -3176,6 +3179,7 @@ func (h *Handler) apiRefreshAccount(w http.ResponseWriter, r *http.Request, id s
 		if profileArn != "" {
 			account.ProfileArn = profileArn
 			config.UpdateAccountProfileArn(id, profileArn)
+			h.pool.UpdateProfileArn(id, profileArn)
 		}
 		return nil
 	}

@@ -7,6 +7,7 @@ import (
 	"kiro-go/auth"
 	"kiro-go/config"
 	"kiro-go/logger"
+	"kiro-go/pool"
 	"net/http"
 	neturl "net/url"
 	"strings"
@@ -19,6 +20,14 @@ const (
 
 // GetUsageLimits 获取账户使用量和订阅信息
 func GetUsageLimits(account *config.Account) (*UsageLimitsResponse, error) {
+	if account != nil && strings.TrimSpace(account.ProfileArn) == "" {
+		if profileArn, err := ResolveProfileArn(account); err == nil {
+			account.ProfileArn = profileArn
+		} else {
+			logger.Warnf("[GetUsageLimits] Failed to resolve profile ARN for %s: %v", account.Email, err)
+		}
+	}
+
 	url := fmt.Sprintf("%s/getUsageLimits?origin=AI_EDITOR&resourceType=AGENTIC_REQUEST&isEmailRequired=true", kiroRestAPIBase)
 	url = withProfileArnQuery(url, account)
 
@@ -80,6 +89,14 @@ func GetUserInfo(account *config.Account) (*UserInfoResponse, error) {
 
 // ListAvailableModels 获取可用模型列表
 func ListAvailableModels(account *config.Account) ([]ModelInfo, error) {
+	if account != nil && strings.TrimSpace(account.ProfileArn) == "" {
+		if profileArn, err := ResolveProfileArn(account); err == nil {
+			account.ProfileArn = profileArn
+		} else {
+			logger.Warnf("[ListAvailableModels] Failed to resolve profile ARN for %s: %v", account.Email, err)
+		}
+	}
+
 	url := fmt.Sprintf("%s/ListAvailableModels?origin=AI_EDITOR&maxResults=50", kiroRestAPIBase)
 	url = withProfileArnQuery(url, account)
 
@@ -128,6 +145,7 @@ func ResolveProfileArn(account *config.Account) (string, error) {
 			logger.Warnf("[ProfileArn] Failed to cache profile ARN for %s: %v", account.Email, updateErr)
 		}
 		account.ProfileArn = profileArn
+		pool.GetPool().UpdateProfileArn(account.ID, profileArn)
 		return profileArn, nil
 	}
 
@@ -139,6 +157,7 @@ func ResolveProfileArn(account *config.Account) (string, error) {
 				logger.Warnf("[ProfileArn] Failed to cache profile ARN for %s: %v", account.Email, updateErr)
 			}
 			account.ProfileArn = refreshedArn
+			pool.GetPool().UpdateProfileArn(account.ID, refreshedArn)
 			return refreshedArn, nil
 		}
 	}
