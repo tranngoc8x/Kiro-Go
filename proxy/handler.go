@@ -262,6 +262,11 @@ func (h *Handler) backgroundRefresh() {
 
 // refreshAllAccounts 刷新所有账户信息
 func (h *Handler) refreshAllAccounts() {
+	if err := config.Load(); err != nil {
+		logger.Warnf("[BackgroundRefresh] Failed to reload config: %v", err)
+	}
+	h.pool.Reload()
+
 	accounts := config.GetAccounts()
 	for i := range accounts {
 		account := &accounts[i]
@@ -561,6 +566,11 @@ func buildModelInfo(id, ownedBy string, supportsImage bool) map[string]interface
 
 // refreshModelsCache 从 Kiro API 拉取模型列表并缓存
 func (h *Handler) refreshModelsCache() {
+	if err := config.Load(); err != nil {
+		logger.Warnf("[ModelsCache] Failed to reload config: %v", err)
+	}
+	h.pool.Reload()
+
 	accounts := config.GetEnabledAccounts()
 	if len(accounts) == 0 {
 		return
@@ -628,6 +638,11 @@ func (h *Handler) fetchAndCacheAccountModels(account *config.Account) error {
 // apiRefreshAccountModels POST /admin/api/accounts/{id}/models/refresh
 // 立即为指定账号拉取并更新模型路由缓存。
 func (h *Handler) apiRefreshAccountModels(w http.ResponseWriter, r *http.Request, id string) {
+	if err := config.Load(); err != nil {
+		logger.Warnf("[API] Failed to reload config: %v", err)
+	}
+	h.pool.Reload()
+
 	accounts := config.GetAccounts()
 	var account *config.Account
 	for i := range accounts {
@@ -2178,6 +2193,11 @@ func (h *Handler) handleAdminAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) apiGetAccounts(w http.ResponseWriter, r *http.Request) {
+	if err := config.Load(); err != nil {
+		logger.Warnf("[API] Failed to reload config: %v", err)
+	}
+	h.pool.Reload()
+
 	accounts := config.GetAccounts()
 	poolAccounts := h.pool.GetAllAccounts()
 
@@ -2285,6 +2305,11 @@ func (h *Handler) apiDeleteAccount(w http.ResponseWriter, r *http.Request, id st
 }
 
 func (h *Handler) apiUpdateAccount(w http.ResponseWriter, r *http.Request, id string) {
+	if err := config.Load(); err != nil {
+		logger.Warnf("[API] Failed to reload config: %v", err)
+	}
+	h.pool.Reload()
+
 	var updates map[string]interface{}
 	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 		w.WriteHeader(400)
@@ -2434,6 +2459,11 @@ func (h *Handler) apiSetAccountOverage(w http.ResponseWriter, r *http.Request, i
 
 // apiBatchAccounts 批量操作账号（启用/禁用/刷新）
 func (h *Handler) apiBatchAccounts(w http.ResponseWriter, r *http.Request) {
+	if err := config.Load(); err != nil {
+		logger.Warnf("[API] Failed to reload config: %v", err)
+	}
+	h.pool.Reload()
+
 	var req struct {
 		IDs    []string `json:"ids"`
 		Action string   `json:"action"` // "enable", "disable", "refresh"
@@ -3145,6 +3175,11 @@ func (h *Handler) apiTestAccount(w http.ResponseWriter, r *http.Request, id stri
 
 // apiRefreshAccount 刷新账户信息（使用量、订阅等）
 func (h *Handler) apiRefreshAccount(w http.ResponseWriter, r *http.Request, id string) {
+	if err := config.Load(); err != nil {
+		logger.Warnf("[API] Failed to reload config: %v", err)
+	}
+	h.pool.Reload()
+
 	accounts := config.GetAccounts()
 	var account *config.Account
 	for i := range accounts {
