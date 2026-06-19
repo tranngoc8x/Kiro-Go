@@ -163,6 +163,7 @@ type Config struct {
 	SystemVersion string        `json:"systemVersion,omitempty"`
 	NodeVersion   string        `json:"nodeVersion,omitempty"`
 	Accounts      []Account     `json:"accounts"` // Registered Kiro accounts
+	ModelMapping  map[string]string `json:"modelMapping,omitempty"`
 
 	// Thinking mode configuration for extended reasoning output
 	ThinkingSuffix       string `json:"thinkingSuffix,omitempty"`       // Model suffix to trigger thinking mode (default: "-thinking")
@@ -381,6 +382,10 @@ func initDB(dbPath string) (*sql.DB, error) {
 			match TEXT NOT NULL DEFAULT '',
 			replace TEXT NOT NULL DEFAULT '',
 			enabled INTEGER NOT NULL DEFAULT 1
+		);`,
+		`CREATE TABLE IF NOT EXISTS model_mappings (
+			src TEXT PRIMARY KEY,
+			dst TEXT NOT NULL
 		);`,
 	}
 
@@ -674,6 +679,21 @@ func Load() error {
 		c.PromptFilterRules = append(c.PromptFilterRules, r)
 	}
 
+	// 5. Load model mappings
+	mappingRows, err := db.Query(`
+		SELECT src, dst
+		FROM model_mappings`)
+	if err == nil {
+		defer mappingRows.Close()
+		c.ModelMapping = make(map[string]string)
+		for mappingRows.Next() {
+			var src, dst string
+			if err := mappingRows.Scan(&src, &dst); err == nil {
+				c.ModelMapping[src] = dst
+			}
+		}
+	}
+
 	cfg = &c
 	return nil
 }
@@ -792,6 +812,23 @@ func Save() error {
 				id, name, type, match, replace, enabled
 			) VALUES (?, ?, ?, ?, ?, ?)`,
 			r.ID, r.Name, r.Type, r.Match, r.Replace, boolToInt(r.Enabled),
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	// 5. Clear and re-insert model mappings
+	_, err = tx.Exec("DELETE FROM model_mappings")
+	if err != nil {
+		return err
+	}
+	for src, dst := range cfg.ModelMapping {
+		_, err = tx.Exec(`
+			INSERT INTO model_mappings (
+				src, dst
+			) VALUES (?, ?)`,
+			src, dst,
 		)
 		if err != nil {
 			return err
@@ -1232,6 +1269,31 @@ func UpdateThinkingConfig(suffix, openaiFormat, claudeFormat string) error {
 	return Save()
 }
 
+// GetModelMapping returns a copy of the model mapping configuration.
+func GetModelMapping() map[string]string {
+	cfgLock.RLock()
+	defer cfgLock.RUnlock()
+	if cfg == nil || cfg.ModelMapping == nil {
+		return make(map[string]string)
+	}
+	m := make(map[string]string, len(cfg.ModelMapping))
+	for k, v := range cfg.ModelMapping {
+		m[k] = v
+	}
+	return m
+}
+
+// UpdateModelMapping updates the model mapping configuration.
+func UpdateModelMapping(mapping map[string]string) error {
+	cfgLock.Lock()
+	defer cfgLock.Unlock()
+	if cfg == nil {
+		return fmt.Errorf("config not initialized")
+	}
+	cfg.ModelMapping = mapping
+	return Save()
+}
+
 // GetPreferredEndpoint 获取首选端点配置
 func GetPreferredEndpoint() string {
 	cfgLock.RLock()
@@ -1383,4 +1445,11 @@ func defaultSystemVersion() string {
 	default:
 		return "linux#6.6.87"
 	}
+}
+
+// SetMockConfigForTest sets a mock Config for unit testing.
+func SetMockConfigForTest(mock *Config) {
+	cfgLock.Lock()
+	defer cfgLock.Unlock()
+	cfg = mock
 }

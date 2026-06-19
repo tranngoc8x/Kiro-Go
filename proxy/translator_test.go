@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"kiro-go/config"
 	"strings"
 	"testing"
 )
@@ -468,6 +469,41 @@ func TestParseModelAndThinkingDoesNotRewriteDatedSnapshotMinor(t *testing.T) {
 	}
 	if strings.Contains(got, ".") {
 		t.Fatalf("dated snapshot must not be rewritten with a dot, got %q", got)
+	}
+}
+
+func TestParseModelAndThinkingWithCustomMapping(t *testing.T) {
+	config.SetMockConfigForTest(&config.Config{
+		ModelMapping: map[string]string{
+			"model-a":       "claude-sonnet-4.5",
+			"gpt-4o-custom": "claude-sonnet-4.5",
+		},
+	})
+	defer config.SetMockConfigForTest(nil)
+
+	tests := []struct {
+		name         string
+		input        string
+		wantModel    string
+		wantThinking bool
+	}{
+		{"exact match mapping", "model-a", "claude-sonnet-4.5", false},
+		{"mapping with suffix", "model-a-thinking", "claude-sonnet-4.5", true},
+		{"case insensitive mapping", "MODEL-A", "claude-sonnet-4.5", false},
+		{"exact match mapping custom", "gpt-4o-custom", "claude-sonnet-4.5", false},
+		{"unmapped model passes through", "unmapped-model", "unmapped-model", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotModel, gotThinking := ParseModelAndThinking(tc.input, "-thinking")
+			if gotModel != tc.wantModel {
+				t.Errorf("model: got %q, want %q", gotModel, tc.wantModel)
+			}
+			if gotThinking != tc.wantThinking {
+				t.Errorf("thinking: got %v, want %v", gotThinking, tc.wantThinking)
+			}
+		})
 	}
 }
 

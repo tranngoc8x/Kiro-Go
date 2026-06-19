@@ -67,6 +67,17 @@ const minRecentHistoryTurns = 4
 // ParseModelAndThinking resolves a client-supplied model name to a Kiro model ID
 // and reports whether thinking mode was requested via the configured suffix.
 func ParseModelAndThinking(model string, thinkingSuffix string) (string, bool) {
+	// Apply custom model mapping from config if configured
+	if customMapping := config.GetModelMapping(); len(customMapping) > 0 {
+		lowerModel := strings.ToLower(model)
+		for k, v := range customMapping {
+			if strings.ToLower(k) == lowerModel {
+				model = v
+				break
+			}
+		}
+	}
+
 	lower := strings.ToLower(model)
 	thinking := false
 
@@ -76,6 +87,17 @@ func ParseModelAndThinking(model string, thinkingSuffix string) (string, bool) {
 		thinking = true
 		model = model[:len(model)-len(thinkingSuffix)]
 		lower = strings.ToLower(model)
+
+		// Check custom mapping again after stripping thinking suffix
+		if customMapping := config.GetModelMapping(); len(customMapping) > 0 {
+			for k, v := range customMapping {
+				if strings.ToLower(k) == lower {
+					model = v
+					lower = strings.ToLower(model)
+					break
+				}
+			}
+		}
 	}
 
 	// 1) Explicit aliases: dated snapshots, cross-family legacy IDs, non-Anthropic fallbacks.

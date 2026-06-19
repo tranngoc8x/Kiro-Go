@@ -398,6 +398,17 @@
           </div>
         </div>
 
+        <!-- Model Mapping -->
+        <div class="card">
+          <div class="card-header"><span class="card-title" data-i18n="settings.modelMapping">Model Mapping</span></div>
+          <div class="form-group">
+            <label data-i18n="settings.modelMappingLabel">Model Mapping Configuration (JSON format)</label>
+            <textarea id="modelMappingConfig" rows="8" class="w-full p-2 border rounded font-mono" placeholder='{"gpt-4o": "claude-sonnet-4.5"}' style="background: var(--bg-card); color: var(--text-primary); border-color: var(--border-color);"></textarea>
+            <small data-i18n="settings.modelMappingHint">Provide mappings as a JSON object, e.g. {"gpt-4o": "claude-sonnet-4.5"}. When a client requests a key (like gpt-4o), it will be translated to the value (like claude-sonnet-4.5).</small>
+          </div>
+          <button class="btn btn-primary" id="saveModelMappingBtn" data-i18n="settings.saveModelMapping">Save Model Mapping</button>
+        </div>
+
         <!-- Caveman Mode -->
         <div class="card">
           <div class="card-header">

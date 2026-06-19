@@ -451,5 +451,10 @@
   "detail.cavemanRequests": "Caveman Requests",
   "detail.cavemanTokensSaved": "Est. Saved Tokens",
   "settings.cavemanEstTotal": "Est. Total Tokens (w/o Caveman)",
-  "settings.cavemanTokenSavedPct": "% Token Saved"
+  "settings.cavemanTokenSavedPct": "% Token Saved",
+  "settings.modelMapping": "Model Mapping",
+  "settings.modelMappingLabel": "Model Mapping Configuration (JSON format)",
+  "settings.modelMappingHint": "Provide mappings as a JSON object, e.g. {\"gpt-4o\": \"claude-sonnet-4.5\"}. When a client requests a key (like gpt-4o), it will be translated to the value (like claude-sonnet-4.5).",
+  "settings.saveModelMapping": "Save Model Mapping",
+  "settings.modelMappingSaved": "Model mapping saved successfully"
 }

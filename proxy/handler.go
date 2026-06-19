@@ -2165,6 +2165,10 @@ func (h *Handler) handleAdminAPI(w http.ResponseWriter, r *http.Request) {
 		h.apiGetPromptFilter(w, r)
 	case path == "/prompt-filter" && r.Method == "POST":
 		h.apiUpdatePromptFilter(w, r)
+	case path == "/model-mapping" && r.Method == "GET":
+		h.apiGetModelMapping(w, r)
+	case path == "/model-mapping" && r.Method == "POST":
+		h.apiUpdateModelMapping(w, r)
 	case path == "/caveman" && r.Method == "GET":
 		h.apiGetCavemanConfig(w, r)
 	case path == "/caveman" && r.Method == "POST":
@@ -2990,6 +2994,28 @@ func (h *Handler) apiUpdatePromptFilter(w http.ResponseWriter, r *http.Request) 
 		rules = *req.Rules
 	}
 	if err := config.UpdatePromptFilterConfig(fcc, fen, fsb, rules); err != nil {
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (h *Handler) apiGetModelMapping(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(config.GetModelMapping())
+}
+
+func (h *Handler) apiUpdateModelMapping(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	var req map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode(map[string]string{"error": "Invalid JSON"})
+		return
+	}
+
+	if err := config.UpdateModelMapping(req); err != nil {
 		w.WriteHeader(500)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return

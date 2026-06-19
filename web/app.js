@@ -1436,7 +1436,7 @@
     const d = await res.json();
     $('requireApiKey').checked = d.requireApiKey;
     $('allowOverUsage').checked = d.allowOverUsage || false;
-    await Promise.all([loadThinkingConfig(), loadEndpointConfig(), loadProxyConfig(), loadPromptFilter(), loadCavemanConfig(), loadApiKeys()]);
+    await Promise.all([loadThinkingConfig(), loadEndpointConfig(), loadProxyConfig(), loadPromptFilter(), loadCavemanConfig(), loadModelMapping(), loadApiKeys()]);
     refreshCustomSelects();
   }
   async function loadThinkingConfig() {
@@ -1573,6 +1573,47 @@
       if (d.success) {
         updateCavemanBadge(mode);
         toast('🪨 ' + t('settings.cavemanSaved'), 'success');
+      } else {
+        toast(t('common.saveFailed') + ': ' + (d.error || ''), 'error');
+      }
+    } catch (e) {
+      toast(t('common.saveFailed'), 'error');
+    }
+  }
+  async function loadModelMapping() {
+    try {
+      const res = await api('/model-mapping');
+      const d = await res.json();
+      $('modelMappingConfig').value = JSON.stringify(d, null, 2);
+    } catch (e) { /* non-fatal */ }
+  }
+  async function saveModelMapping() {
+    const val = $('modelMappingConfig').value.trim();
+    let mapping = {};
+    if (val) {
+      try {
+        mapping = JSON.parse(val);
+        if (typeof mapping !== 'object' || mapping === null || Array.isArray(mapping)) {
+          throw new Error('Must be a JSON object');
+        }
+        for (const [key, value] of Object.entries(mapping)) {
+          if (typeof key !== 'string' || typeof value !== 'string') {
+            throw new Error('Keys and values must be strings');
+          }
+        }
+      } catch (e) {
+        toast(t('credentials.jsonError'), 'error');
+        return;
+      }
+    }
+    try {
+      const res = await api('/model-mapping', {
+        method: 'POST',
+        body: JSON.stringify(mapping)
+      });
+      const d = await res.json();
+      if (d.success) {
+        toast(t('settings.modelMappingSaved'), 'success');
       } else {
         toast(t('common.saveFailed') + ': ' + (d.error || ''), 'error');
       }
@@ -2732,6 +2773,7 @@
     $('proxyType').addEventListener('change', onProxyTypeChange);
     $('saveProxyBtn').addEventListener('click', saveProxyConfig);
     $('saveCavemanBtn').addEventListener('click', saveCavemanConfig);
+    $('saveModelMappingBtn').addEventListener('click', saveModelMapping);
     $('resetStatsBtn').addEventListener('click', resetStats);
     bindApiKeyEvents();
   }
