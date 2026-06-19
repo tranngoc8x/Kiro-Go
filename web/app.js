@@ -671,11 +671,23 @@
     $('statFailed').textContent = d.failedRequests || 0;
     $('statTokens').textContent = formatNum(d.totalTokens || 0);
     $('statCredits').textContent = (d.totalCredits || 0).toFixed(1);
+
+    const cavemanSaved = d.cavemanTokensSaved || 0;
+    const actualTokens = d.totalTokens || 0;
+    const estTotal = actualTokens + cavemanSaved;
+    const savedPct = estTotal > 0 ? (cavemanSaved / estTotal * 100) : 0;
+
     if ($('globalCavemanRequests')) {
       $('globalCavemanRequests').textContent = d.cavemanRequests || 0;
     }
     if ($('globalCavemanTokensSaved')) {
-      $('globalCavemanTokensSaved').textContent = formatNum(d.cavemanTokensSaved || 0);
+      $('globalCavemanTokensSaved').textContent = formatNum(cavemanSaved);
+    }
+    if ($('globalEstTotalTokens')) {
+      $('globalEstTotalTokens').textContent = cavemanSaved > 0 ? formatNum(estTotal) : '—';
+    }
+    if ($('globalTokenSavedPct')) {
+      $('globalTokenSavedPct').textContent = cavemanSaved > 0 ? savedPct.toFixed(1) + '%' : '—';
     }
   }
   async function loadAccounts() {

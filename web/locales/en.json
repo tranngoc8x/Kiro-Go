@@ -449,5 +449,7 @@
   "settings.cavemanRequests": "Caveman Requests",
   "settings.cavemanSavedTokens": "Est. Saved Tokens",
   "detail.cavemanRequests": "Caveman Requests",
-  "detail.cavemanTokensSaved": "Est. Saved Tokens"
+  "detail.cavemanTokensSaved": "Est. Saved Tokens",
+  "settings.cavemanEstTotal": "Est. Total Tokens (w/o Caveman)",
+  "settings.cavemanTokenSavedPct": "% Token Saved"
 }
