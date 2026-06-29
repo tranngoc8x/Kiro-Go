@@ -391,3 +391,114 @@ func TestResponsesStreamSSE(t *testing.T) {
 		t.Fatalf("expected stream content delta, got:\n%s", bodyStr)
 	}
 }
+
+func TestResponsesNonStreamReasoning(t *testing.T) {
+	h, cleanup := setupResponsesTestHandler(t)
+	defer cleanup()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(awsEventStreamFrame(t, "reasoningContentEvent", map[string]interface{}{
+			"text": "thinking step 1",
+		}))
+		_, _ = w.Write(awsEventStreamFrame(t, "assistantResponseEvent", map[string]interface{}{
+			"content": "final answer",
+		}))
+	}))
+	defer server.Close()
+	defer swapKiroEndpointsForTest(t, server)()
+
+	body := strings.NewReader(`{
+		"model":"claude-sonnet-4.5",
+		"input":"hello",
+		"reasoning":{"effort":"high"}
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", body)
+	rec := httptest.NewRecorder()
+
+	h.handleOpenAIResponses(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var resp ResponsesObject
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(resp.Output) != 2 {
+		t.Fatalf("expected 2 output items, got %d: %+v", len(resp.Output), resp.Output)
+	}
+
+	if resp.Output[0].Type != "reasoning" || len(resp.Output[0].Summary) == 0 {
+		t.Fatalf("expected first item to be reasoning, got %+v", resp.Output[0])
+	}
+	if resp.Output[0].Summary[0].Text != "thinking step 1" {
+		t.Fatalf("unexpected reasoning text: %q", resp.Output[0].Summary[0].Text)
+	}
+
+	if resp.Output[1].Type != "message" || len(resp.Output[1].Content) == 0 {
+		t.Fatalf("expected second item to be message, got %+v", resp.Output[1])
+	}
+	if resp.Output[1].Content[0].Text != "final answer" {
+		t.Fatalf("unexpected message text: %q", resp.Output[1].Content[0].Text)
+	}
+}
+
+func TestResponsesStreamReasoning(t *testing.T) {
+	h, cleanup := setupResponsesTestHandler(t)
+	defer cleanup()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(awsEventStreamFrame(t, "reasoningContentEvent", map[string]interface{}{
+			"text": "thinking step 1",
+		}))
+		_, _ = w.Write(awsEventStreamFrame(t, "assistantResponseEvent", map[string]interface{}{
+			"content": "final answer",
+		}))
+	}))
+	defer server.Close()
+	defer swapKiroEndpointsForTest(t, server)()
+
+	body := strings.NewReader(`{
+		"model":"claude-sonnet-4.5",
+		"input":"hello",
+		"stream":true,
+		"reasoning":{"effort":"high"}
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", body)
+	rec := httptest.NewRecorder()
+
+	h.handleOpenAIResponses(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	bodyBytes, _ := io.ReadAll(rec.Body)
+	bodyStr := string(bodyBytes)
+
+	expectedEvents := []string{
+		"event: response.output_item.added\ndata: {\"output_index\":0,\"item\":{\"id\":\"rs_",
+		"event: response.reasoning_summary_part.added\ndata: {\"item_id\":\"rs_",
+		"event: response.reasoning_summary_text.delta\ndata: {\"item_id\":\"rs_",
+		"event: response.reasoning_summary_text.done\ndata: {\"item_id\":\"rs_",
+		"event: response.reasoning_summary_part.done\ndata: {\"item_id\":\"rs_",
+		"event: response.output_item.done\ndata: {\"output_index\":0,\"item\":{\"id\":\"rs_",
+		"event: response.output_item.added\ndata: {\"output_index\":1,\"item\":{\"content\":[],\"id\":\"msg_",
+		"event: response.content_part.added\ndata: {\"content_index\":0,\"item_id\":\"msg_",
+		"event: response.output_text.delta\ndata: {\"content_index\":0,\"delta\":\"final answer\"",
+		"event: response.content_part.done\ndata: {\"content_index\":0,\"item_id\":\"msg_",
+		"event: response.output_item.done\ndata: {\"output_index\":1,\"item\":{\"content\":[{\"type\":\"output_text\",\"",
+		"event: response.completed",
+	}
+
+	for _, evt := range expectedEvents {
+		if !strings.Contains(bodyStr, evt) {
+			t.Fatalf("missing event pattern %q in stream body:\n%s", evt, bodyStr)
+		}
+	}
+}
+
